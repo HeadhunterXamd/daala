@@ -61,7 +61,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #define OD_MAXI(_a,_b)      ((_a)>(_b)?(_a):(_b))
 #define OD_CLAMPI(_a,_b,_c) (OD_MAXI(_a,OD_MINI(_b,_c)))
 #define OD_SIGNMASK(_a)     (-((_a)<0))
-#define OD_FLIPSIGNI(_a,_b) ((_a)+OD_SIGNMASK(_b)^OD_SIGNMASK(_b))
+#define OD_FLIPSIGNI(_a,_b) (((_a) + OD_SIGNMASK(_b)) ^ OD_SIGNMASK(_b))
 #define OD_DIV_ROUND(_x,_y) (((_x)+OD_FLIPSIGNI((_y)>>1,_x))/(_y))
 #define OD_CLAMP255(_x)     ((unsigned char)((((_x)<0)-1)&((_x)|-((_x)>255))))
 
@@ -109,7 +109,7 @@ void od_free_2d(void *_ptr){
 
 static void usage(const char *_argv0){
   fprintf(stderr,
-   "Usage: %s [options] <input>\n\n"
+   "Usage: %s [options] -o <filename.png> <input.y4m>\n\n"
    "The <input> argument uses C printf format to represent a list of files,\n"
    "  i.e. file-%%05d.png to look for files file00001.png to file99999.png.\n\n"
    "Options: \n\n"
@@ -207,12 +207,12 @@ static void ycbcr_to_rgb(png_bytep *_image,const video_input_info *_info,
       _image[j][i++]=(unsigned char)(gval&0xFF);
       _image[j][i++]=(unsigned char)(bval>>8);
       _image[j][i++]=(unsigned char)(bval&0xFF);
-      dc=y-y_row&(xstride)|1-hshift;
+      dc = ((y - y_row) & xstride) | (1 - hshift);
       y+=xstride;
       cb+=dc;
       cr+=dc;
     }
-    dc=-(pic_y+j&1|1-vshift);
+    dc = -(((pic_y + j) & 1) | (1 - vshift));
     y_row+=y_stride;
     cb_row+=dc&cb_stride;
     cr_row+=dc&cr_stride;

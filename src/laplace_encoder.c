@@ -28,11 +28,56 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 
 #include <stdio.h>
 
-#include "laplace_code.h"
+#include "pvq_encoder.h"
+#include "pvq.h"
 #include "entenc.h"
 #include "entdec.h"
 #include "logging.h"
 #include "odintrin.h"
+
+static void od_encode_pvq_split(od_ec_enc *ec, od_pvq_codeword_ctx *adapt,
+ int count, int sum, int ctx) {
+  int shift;
+  int rest;
+  int fctx;
+  if (sum == 0) return;
+  shift = OD_MAXI(0, OD_ILOG(sum) - 3);
+  if (shift) {
+    rest = count & ((1 << shift) - 1);
+    count >>= shift;
+    sum >>= shift;
+  }
+  fctx = 7*ctx + sum - 1;
+  od_encode_cdf_adapt(ec, count, adapt->pvq_split_cdf[fctx],
+   sum + 1, adapt->pvq_split_increment);
+  if (shift) od_ec_enc_bits(ec, rest, shift);
+}
+
+void od_encode_band_pvq_splits(od_ec_enc *ec, od_pvq_codeword_ctx *adapt,
+ const int *y, int n, int k, int level) {
+  int mid;
+  int i;
+  int count_right;
+  if (n <= 1 || k == 0) return;
+  if (k == 1 && n <= 16) {
+    int cdf_id;
+    int pos;
+    cdf_id = od_pvq_k1_ctx(n, level == 0);
+    for (pos = 0; !y[pos]; pos++);
+    OD_ASSERT(pos < n);
+    od_encode_cdf_adapt(ec, pos, adapt->pvq_k1_cdf[cdf_id], n,
+     adapt->pvq_k1_increment);
+  }
+  else {
+    mid = n >> 1;
+    count_right = k;
+    for (i = 0; i < mid; i++) count_right -= abs(y[i]);
+    od_encode_pvq_split(ec, adapt, count_right, k, od_pvq_size_ctx(n));
+    od_encode_band_pvq_splits(ec, adapt, y, mid, k - count_right, level + 1);
+    od_encode_band_pvq_splits(ec, adapt, y + mid, n - mid, count_right,
+     level + 1);
+  }
+}
 
 /** Encodes the tail of a Laplace-distributed variable, i.e. it doesn't
  * do anything special for the zero case.
@@ -106,7 +151,7 @@ void laplace_encode(od_ec_enc *enc, int x, int ex_q8, int k) {
   int decay;
   int offset;
   /* shift down x if expectation is too high */
-  shift = od_ilog(ex_q8) - 11;
+  shift = OD_ILOG(ex_q8) - 11;
   if (shift < 0) shift = 0;
   /* Apply the shift with rounding to Ex, K and xs */
   ex_q8 = (ex_q8 + (1 << shift >> 1)) >> shift;

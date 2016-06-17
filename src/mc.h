@@ -73,9 +73,13 @@ typedef struct od_mv_grid_pt od_mv_grid_pt;
 struct od_mv_grid_pt {
   /*The x, y offsets of the motion vector in units of 1/8th pixels.*/
   int mv[2];
+  /*The motion vector for backward prediction.*/
+  int mv1[2];
   /*Whether or not this MV actually has a valid value.*/
   unsigned valid:1;
   /*The ref image that this MV points into.*/
+  /*For P frame, 0:golden frame, 1:previous frame. */
+  /*For B frame, 1:previous frame, 2:next frame, 3:both frames.*/
   unsigned ref:3;
 };
 
@@ -93,11 +97,12 @@ extern const int16_t OD_SUBPEL_FILTER_SET[8][8];
 #define OD_SUBPEL_BOTTOM_APRON_SZ (OD_SUBPEL_FILTER_TAP_SIZE/2)
 #define OD_SUBPEL_BUFF_APRON_SZ (OD_SUBPEL_TOP_APRON_SZ \
  + OD_SUBPEL_BOTTOM_APRON_SZ)
+#define OD_SUBPEL_COEFF_NORMALIZE (128 << OD_SUBPEL_COEFF_SCALE)
 
-void od_mc_predict8_singleref(od_state *state, unsigned char *dst, int dystride,
+void od_mc_predict_singleref(od_state *state, unsigned char *dst, int dystride,
  const unsigned char *src, int systride, const int32_t mvx[4],
  const int32_t mvy[4], int oc, int s, int log_xblk_sz, int log_yblk_sz);
-void od_mc_predict8(od_state *state, unsigned char *dst, int dystride,
+void od_mc_predict(od_state *state, unsigned char *dst, int dystride,
  const unsigned char *src[4], int systride, const int32_t mvx[4],
  const int32_t mvy[4], int oc, int s, int log_xblk_sz, int log_yblk_sz);
 void od_state_mvs_clear(od_state *state);

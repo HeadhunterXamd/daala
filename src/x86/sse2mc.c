@@ -32,6 +32,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #include "x86int.h"
 #include "cpu.h"
 #include "../mc.h"
+#include "../util.h"
 
 #if defined(OD_X86ASM)
 #include <xmmintrin.h>
@@ -75,11 +76,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 static const unsigned short __attribute__((aligned(16),used)) OD_BIL4H[8]={
   0x0,0x1,0x2,0x3,0x0,0x1,0x2,0x3
 };
-static const unsigned short __attribute__((aligned(16),used)) OD_BILH[32]={
+static const unsigned short __attribute__((aligned(16),used)) OD_BILH[64]={
   0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
   0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
   0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
   0x18,0x19,0x1A,0x1B,0x1C,0x1D,0x1E,0x1F,
+  0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,
+  0x28,0x29,0x2A,0x2B,0x2C,0x2D,0x2E,0x2F,
+  0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,
+  0x38,0x39,0x3A,0x3B,0x3C,0x3D,0x3E,0x3F
 };
 static const unsigned short __attribute__((aligned(16),used)) OD_BIL4V[64]={
   0x0,0x0,0x0,0x0,0x1,0x1,0x1,0x1,
@@ -91,123 +96,140 @@ static const unsigned short __attribute__((aligned(16),used)) OD_BIL4V[64]={
   0xC,0xC,0xC,0xC,0xD,0xD,0xD,0xD,
   0xE,0xE,0xE,0xE,0xF,0xF,0xF,0xF
 };
-static const unsigned short __attribute__((aligned(16),used)) OD_BILV[128]={
-  0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,
-  0x1,0x1,0x1,0x1,0x1,0x1,0x1,0x1,
-  0x2,0x2,0x2,0x2,0x2,0x2,0x2,0x2,
-  0x3,0x3,0x3,0x3,0x3,0x3,0x3,0x3,
-  0x4,0x4,0x4,0x4,0x4,0x4,0x4,0x4,
-  0x5,0x5,0x5,0x5,0x5,0x5,0x5,0x5,
-  0x6,0x6,0x6,0x6,0x6,0x6,0x6,0x6,
-  0x7,0x7,0x7,0x7,0x7,0x7,0x7,0x7,
-  0x8,0x8,0x8,0x8,0x8,0x8,0x8,0x8,
-  0x9,0x9,0x9,0x9,0x9,0x9,0x9,0x9,
-  0xA,0xA,0xA,0xA,0xA,0xA,0xA,0xA,
-  0xB,0xB,0xB,0xB,0xB,0xB,0xB,0xB,
-  0xC,0xC,0xC,0xC,0xC,0xC,0xC,0xC,
-  0xD,0xD,0xD,0xD,0xD,0xD,0xD,0xD,
-  0xE,0xE,0xE,0xE,0xE,0xE,0xE,0xE,
-  0xF,0xF,0xF,0xF,0xF,0xF,0xF,0xF
-};
-static const unsigned short __attribute__((aligned(16),used)) OD_BIL16V[512]={
-  0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+static const unsigned short __attribute__((aligned(16),used)) OD_BILV[512]={
   0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
   0x01,0x01,0x01,0x01,0x01,0x01,0x01,0x01,
-  0x01,0x01,0x01,0x01,0x01,0x01,0x01,0x01,
-  0x02,0x02,0x02,0x02,0x02,0x02,0x02,0x02,
   0x02,0x02,0x02,0x02,0x02,0x02,0x02,0x02,
   0x03,0x03,0x03,0x03,0x03,0x03,0x03,0x03,
-  0x03,0x03,0x03,0x03,0x03,0x03,0x03,0x03,
-  0x04,0x04,0x04,0x04,0x04,0x04,0x04,0x04,
   0x04,0x04,0x04,0x04,0x04,0x04,0x04,0x04,
   0x05,0x05,0x05,0x05,0x05,0x05,0x05,0x05,
-  0x05,0x05,0x05,0x05,0x05,0x05,0x05,0x05,
-  0x06,0x06,0x06,0x06,0x06,0x06,0x06,0x06,
   0x06,0x06,0x06,0x06,0x06,0x06,0x06,0x06,
   0x07,0x07,0x07,0x07,0x07,0x07,0x07,0x07,
-  0x07,0x07,0x07,0x07,0x07,0x07,0x07,0x07,
-  0x08,0x08,0x08,0x08,0x08,0x08,0x08,0x08,
   0x08,0x08,0x08,0x08,0x08,0x08,0x08,0x08,
   0x09,0x09,0x09,0x09,0x09,0x09,0x09,0x09,
-  0x09,0x09,0x09,0x09,0x09,0x09,0x09,0x09,
-  0x0A,0x0A,0x0A,0x0A,0x0A,0x0A,0x0A,0x0A,
   0x0A,0x0A,0x0A,0x0A,0x0A,0x0A,0x0A,0x0A,
   0x0B,0x0B,0x0B,0x0B,0x0B,0x0B,0x0B,0x0B,
-  0x0B,0x0B,0x0B,0x0B,0x0B,0x0B,0x0B,0x0B,
-  0x0C,0x0C,0x0C,0x0C,0x0C,0x0C,0x0C,0x0C,
   0x0C,0x0C,0x0C,0x0C,0x0C,0x0C,0x0C,0x0C,
   0x0D,0x0D,0x0D,0x0D,0x0D,0x0D,0x0D,0x0D,
-  0x0D,0x0D,0x0D,0x0D,0x0D,0x0D,0x0D,0x0D,
-  0x0E,0x0E,0x0E,0x0E,0x0E,0x0E,0x0E,0x0E,
   0x0E,0x0E,0x0E,0x0E,0x0E,0x0E,0x0E,0x0E,
   0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,
-  0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,0x0F,
-  0x10,0x10,0x10,0x10,0x10,0x10,0x10,0x10,
   0x10,0x10,0x10,0x10,0x10,0x10,0x10,0x10,
   0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,
-  0x11,0x11,0x11,0x11,0x11,0x11,0x11,0x11,
-  0x12,0x12,0x12,0x12,0x12,0x12,0x12,0x12,
   0x12,0x12,0x12,0x12,0x12,0x12,0x12,0x12,
   0x13,0x13,0x13,0x13,0x13,0x13,0x13,0x13,
-  0x13,0x13,0x13,0x13,0x13,0x13,0x13,0x13,
-  0x14,0x14,0x14,0x14,0x14,0x14,0x14,0x14,
   0x14,0x14,0x14,0x14,0x14,0x14,0x14,0x14,
   0x15,0x15,0x15,0x15,0x15,0x15,0x15,0x15,
-  0x15,0x15,0x15,0x15,0x15,0x15,0x15,0x15,
-  0x16,0x16,0x16,0x16,0x16,0x16,0x16,0x16,
   0x16,0x16,0x16,0x16,0x16,0x16,0x16,0x16,
   0x17,0x17,0x17,0x17,0x17,0x17,0x17,0x17,
-  0x17,0x17,0x17,0x17,0x17,0x17,0x17,0x17,
-  0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,
   0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,
   0x19,0x19,0x19,0x19,0x19,0x19,0x19,0x19,
-  0x19,0x19,0x19,0x19,0x19,0x19,0x19,0x19,
-  0x1A,0x1A,0x1A,0x1A,0x1A,0x1A,0x1A,0x1A,
   0x1A,0x1A,0x1A,0x1A,0x1A,0x1A,0x1A,0x1A,
   0x1B,0x1B,0x1B,0x1B,0x1B,0x1B,0x1B,0x1B,
-  0x1B,0x1B,0x1B,0x1B,0x1B,0x1B,0x1B,0x1B,
-  0x1C,0x1C,0x1C,0x1C,0x1C,0x1C,0x1C,0x1C,
   0x1C,0x1C,0x1C,0x1C,0x1C,0x1C,0x1C,0x1C,
   0x1D,0x1D,0x1D,0x1D,0x1D,0x1D,0x1D,0x1D,
-  0x1D,0x1D,0x1D,0x1D,0x1D,0x1D,0x1D,0x1D,
-  0x1E,0x1E,0x1E,0x1E,0x1E,0x1E,0x1E,0x1E,
   0x1E,0x1E,0x1E,0x1E,0x1E,0x1E,0x1E,0x1E,
   0x1F,0x1F,0x1F,0x1F,0x1F,0x1F,0x1F,0x1F,
-  0x1F,0x1F,0x1F,0x1F,0x1F,0x1F,0x1F,0x1F
+  0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,
+  0x21,0x21,0x21,0x21,0x21,0x21,0x21,0x21,
+  0x22,0x22,0x22,0x22,0x22,0x22,0x22,0x22,
+  0x23,0x23,0x23,0x23,0x23,0x23,0x23,0x23,
+  0x24,0x24,0x24,0x24,0x24,0x24,0x24,0x24,
+  0x25,0x25,0x25,0x25,0x25,0x25,0x25,0x25,
+  0x26,0x26,0x26,0x26,0x26,0x26,0x26,0x26,
+  0x27,0x27,0x27,0x27,0x27,0x27,0x27,0x27,
+  0x28,0x28,0x28,0x28,0x28,0x28,0x28,0x28,
+  0x29,0x29,0x29,0x29,0x29,0x29,0x29,0x29,
+  0x2A,0x2A,0x2A,0x2A,0x2A,0x2A,0x2A,0x2A,
+  0x2B,0x2B,0x2B,0x2B,0x2B,0x2B,0x2B,0x2B,
+  0x2C,0x2C,0x2C,0x2C,0x2C,0x2C,0x2C,0x2C,
+  0x2D,0x2D,0x2D,0x2D,0x2D,0x2D,0x2D,0x2D,
+  0x2E,0x2E,0x2E,0x2E,0x2E,0x2E,0x2E,0x2E,
+  0x2F,0x2F,0x2F,0x2F,0x2F,0x2F,0x2F,0x2F,
+  0x30,0x30,0x30,0x30,0x30,0x30,0x30,0x30,
+  0x31,0x31,0x31,0x31,0x31,0x31,0x31,0x31,
+  0x32,0x32,0x32,0x32,0x32,0x32,0x32,0x32,
+  0x33,0x33,0x33,0x33,0x33,0x33,0x33,0x33,
+  0x34,0x34,0x34,0x34,0x34,0x34,0x34,0x34,
+  0x35,0x35,0x35,0x35,0x35,0x35,0x35,0x35,
+  0x36,0x36,0x36,0x36,0x36,0x36,0x36,0x36,
+  0x37,0x37,0x37,0x37,0x37,0x37,0x37,0x37,
+  0x38,0x38,0x38,0x38,0x38,0x38,0x38,0x38,
+  0x39,0x39,0x39,0x39,0x39,0x39,0x39,0x39,
+  0x3A,0x3A,0x3A,0x3A,0x3A,0x3A,0x3A,0x3A,
+  0x3B,0x3B,0x3B,0x3B,0x3B,0x3B,0x3B,0x3B,
+  0x3C,0x3C,0x3C,0x3C,0x3C,0x3C,0x3C,0x3C,
+  0x3D,0x3D,0x3D,0x3D,0x3D,0x3D,0x3D,0x3D,
+  0x3E,0x3E,0x3E,0x3E,0x3E,0x3E,0x3E,0x3E,
+  0x3F,0x3F,0x3F,0x3F,0x3F,0x3F,0x3F,0x3F
 };
 
 #if defined(OD_CHECKASM)
-void od_mc_predict1fmv8_check(unsigned char *_dst,const unsigned char *_src,
- int _systride,int32_t _mvx,int32_t _mvy,
- int _log_xblk_sz,int _log_yblk_sz){
+void od_mc_predict1fmv8_check(od_state *state, unsigned char *_dst,
+ const unsigned char *_src, int _systride, int32_t _mvx, int32_t _mvy,
+ int _log_xblk_sz, int _log_yblk_sz){
   unsigned char dst[OD_MVBSIZE_MAX*OD_MVBSIZE_MAX];
-  int           xblk_sz;
-  int           yblk_sz;
-  int           failed;
-  int           i;
-  int           j;
-  xblk_sz=1<<_log_xblk_sz;
-  yblk_sz=1<<_log_yblk_sz;
-  failed=0;
-  od_mc_predict1fmv8_c(dst,_src,_systride,_mvx,_mvy,
-   _log_xblk_sz,_log_yblk_sz);
-  for(j=0;j<yblk_sz;j++){
-    for(i=0;i<xblk_sz;i++){
-      if(_dst[i+(j<<_log_xblk_sz)]!=dst[i+(j<<_log_xblk_sz)]){
-        fprintf(stderr,"ASM mismatch: 0x%02X!=0x%02X @ (%2i,%2i)\n",
-         _dst[i+(j<<_log_xblk_sz)],dst[i+(j<<_log_xblk_sz)],i,j);
-        failed=1;
+  int xblk_sz;
+  int yblk_sz;
+  int failed;
+  int i;
+  int j;
+  xblk_sz = 1 << _log_xblk_sz;
+  yblk_sz = 1 << _log_yblk_sz;
+  failed = 0;
+  od_mc_predict1fmv8_c(state, dst, _src, _systride, _mvx, _mvy,
+   _log_xblk_sz, _log_yblk_sz);
+  for (j = 0; j < yblk_sz; j++) {
+    for (i = 0; i < xblk_sz; i++) {
+      if (_dst[i + (j << _log_xblk_sz)] != dst[i + (j << _log_xblk_sz)]) {
+        fprintf(stderr, "ASM mismatch: 0x%02X!=0x%02X @ (%2i,%2i)\n",
+         _dst[i + (j << _log_xblk_sz)], dst[i + (j << _log_xblk_sz)], i, j);
+        failed = 1;
       }
     }
   }
-  if(failed){
-    fprintf(stderr,"od_mc_predict1fmv8 %ix%i check failed.\n",
-     (1<<_log_xblk_sz),(1<<_log_yblk_sz));
+  if (failed) {
+    fprintf(stderr, "od_mc_predict1fmv8 %ix%i check failed.\n",
+     (1 << _log_xblk_sz), (1 << _log_yblk_sz));
+  }
+  OD_ASSERT(!failed);
+}
+
+void od_mc_predict1fmv16_check(od_state *state, unsigned char *_dst,
+ const unsigned char *_src, int _systride, int32_t _mvx, int32_t _mvy,
+ int _log_xblk_sz, int _log_yblk_sz){
+  unsigned char dst[OD_MVBSIZE_MAX*OD_MVBSIZE_MAX*2];
+  int xblk_sz;
+  int yblk_sz;
+  int failed;
+  int i;
+  int j;
+  int _dst_val;
+  int dst_val;
+  xblk_sz = 1 << _log_xblk_sz;
+  yblk_sz = 1 << _log_yblk_sz;
+  failed = 0;
+  od_mc_predict1fmv16_c(state, dst, _src, _systride, _mvx, _mvy,
+   _log_xblk_sz, _log_yblk_sz);
+  for (j = 0; j < yblk_sz; j++) {
+    for (i = 0; i < xblk_sz; i++) {
+      _dst_val = ((int16_t *)_dst)[i + (j << _log_xblk_sz)];
+      dst_val = ((int16_t *)dst)[i + (j << _log_xblk_sz)];
+      if (_dst_val != dst_val) {
+        fprintf(stderr,"ASM mismatch: 0x%04X!=0x%04X @ (%2i,%2i)\n",
+         _dst_val, dst_val, i, j);
+        failed = 1;
+      }
+    }
+  }
+  if (failed) {
+    fprintf(stderr, "od_mc_predict1fmv8 %ix%i check failed.\n",
+     (1 << _log_xblk_sz), (1 << _log_yblk_sz));
   }
   OD_ASSERT(!failed);
 }
 #endif
 
+#if defined(OD_SSE2_INTRINSICS)
 /*Fills 3 vectors with pairs of alternating 16 bit values for the 1D filter
    chosen for the fractional position of x or y mv.*/
 OD_SIMD_INLINE void od_setup_alternating_filter_variables(
@@ -222,7 +244,7 @@ OD_SIMD_INLINE void od_setup_alternating_filter_variables(
   *filter_45 = _mm_set1_epi32(f[2]);
 }
 
-OD_SIMD_INLINE __m128i od_mc_multiply_reduce_add_horizontal_4(
+OD_SIMD_INLINE __m128i od_mc_multiply_reduce_add_horizontal8_4(
  __m128i src_vec, __m128i fx01, __m128i fx23, __m128i fx45) {
   __m128i src8pels;
   __m128i sums;
@@ -278,11 +300,11 @@ OD_SIMD_INLINE void od_mc_predict1fmv8_horizontal_nxm(int16_t *buff_p,
         __m128i tmp;
         __m128i sums;
         tmp = _mm_loadu_si128((__m128i *)(src_p + i - OD_SUBPEL_TOP_APRON_SZ));
-        sums = od_mc_multiply_reduce_add_horizontal_4(tmp, fx01, fx23, fx45);
+        sums = od_mc_multiply_reduce_add_horizontal8_4(tmp, fx01, fx23, fx45);
         /*Only store as many values as xblk_sz.*/
-        if(xblk_sz >= 4) {
+        if (xblk_sz >= 4) {
           OD_ASSERT(i + 4 <= xblk_sz);
-          _mm_storel_epi64((__m128i *) (buff_p + i), sums);
+          _mm_storel_epi64((__m128i *)(buff_p + i), sums);
         }
         else {
           OD_ASSERT(i + 2 <= xblk_sz);
@@ -326,44 +348,50 @@ OD_SIMD_INLINE void od_mc_predict1fmv8_horizontal_nxm(int16_t *buff_p,
   }
 }
 
-void od_mc_predict1fmv8_horizontal_2x2(int16_t *buff_p,
+static void od_mc_predict1fmv8_horizontal_2x2(int16_t *buff_p,
  const unsigned char *src_p, int systride, int mvxf, int mvyf) {
   od_mc_predict1fmv8_horizontal_nxm(buff_p, src_p, systride, mvxf, mvyf, 2, 2);
 }
 
-void od_mc_predict1fmv8_horizontal_4x4(int16_t *buff_p,
+static void od_mc_predict1fmv8_horizontal_4x4(int16_t *buff_p,
  const unsigned char *src_p, int systride, int mvxf, int mvyf) {
   od_mc_predict1fmv8_horizontal_nxm(buff_p, src_p, systride, mvxf, mvyf, 4, 4);
 }
 
-void od_mc_predict1fmv8_horizontal_8x8(int16_t *buff_p,
+static void od_mc_predict1fmv8_horizontal_8x8(int16_t *buff_p,
  const unsigned char *src_p, int systride, int mvxf, int mvyf) {
   od_mc_predict1fmv8_horizontal_nxm(buff_p, src_p, systride, mvxf, mvyf, 8, 8);
 }
 
-void od_mc_predict1fmv8_horizontal_16x16(int16_t *buff_p,
+static void od_mc_predict1fmv8_horizontal_16x16(int16_t *buff_p,
  const unsigned char *src_p, int systride, int mvxf, int mvyf) {
   od_mc_predict1fmv8_horizontal_nxm(buff_p, src_p, systride, mvxf, mvyf,
    16, 16);
 }
 
-void od_mc_predict1fmv8_horizontal_32x32(int16_t *buff_p,
+static void od_mc_predict1fmv8_horizontal_32x32(int16_t *buff_p,
  const unsigned char *src_p, int systride, int mvxf, int mvyf) {
   od_mc_predict1fmv8_horizontal_nxm(buff_p, src_p, systride, mvxf, mvyf,
    32, 32);
 }
 
+static void od_mc_predict1fmv8_horizontal_64x64(int16_t *buff_p,
+ const unsigned char *src_p, int systride, int mvxf, int mvyf) {
+  od_mc_predict1fmv8_horizontal_nxm(buff_p, src_p, systride, mvxf, mvyf,
+   64, 64);
+}
+
 typedef void (*od_mc_predict1fmv8_horizontal_fixed_func)(int16_t *buff_p,
  const unsigned char *src_p, int systride, int mvxf, int mvyf);
 
-#if defined(OD_SSE2_INTRINSICS)
-void od_mc_predict1fmv8_sse2(unsigned char *dst,const unsigned char *src,
- int systride, int32_t mvx, int32_t mvy,
+void od_mc_predict1fmv8_sse2(od_state *state, unsigned char *dst,
+ const unsigned char *src, int systride, int32_t mvx, int32_t mvy,
  int log_xblk_sz, int log_yblk_sz) {
-  static const od_mc_predict1fmv8_horizontal_fixed_func VTBL_HORIZONTAL[5] = {
+  static const od_mc_predict1fmv8_horizontal_fixed_func
+   VTBL_HORIZONTAL[OD_LOG_MVBSIZE_MAX] = {
     od_mc_predict1fmv8_horizontal_2x2, od_mc_predict1fmv8_horizontal_4x4,
     od_mc_predict1fmv8_horizontal_8x8, od_mc_predict1fmv8_horizontal_16x16,
-    od_mc_predict1fmv8_horizontal_32x32
+    od_mc_predict1fmv8_horizontal_32x32, od_mc_predict1fmv8_horizontal_64x64
   };
   int mvxf;
   int mvyf;
@@ -396,7 +424,7 @@ void od_mc_predict1fmv8_sse2(unsigned char *dst,const unsigned char *src,
   mvxf = mvx & 0x07;
   mvyf = mvy & 0x07;
   /*Check whether mvxf and mvyf are in the range [0...7],
-     i.e. downto 1/8 precision.*/
+     i.e. down to 1/8 precision.*/
   OD_ASSERT(mvxf <= 7);
   OD_ASSERT(mvyf <= 7);
   /*MC with subpel MV?*/
@@ -431,30 +459,30 @@ void od_mc_predict1fmv8_sse2(unsigned char *dst,const unsigned char *src,
           __m128i row01_hi;
           __m128i out;
           OD_ASSERT((buff_p + i + ((0 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
-           < buff + sizeof(buff));
+           < buff + sizeof(buff)/sizeof(buff[0]));
           OD_ASSERT((buff_p + i + ((1 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
-           < buff + sizeof(buff));
+           < buff + sizeof(buff)/sizeof(buff[0]));
           OD_ASSERT((buff_p + i + ((2 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
-           < buff + sizeof(buff));
+           < buff + sizeof(buff)/sizeof(buff[0]));
           OD_ASSERT((buff_p + i + ((3 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
-           < buff + sizeof(buff));
+           < buff + sizeof(buff)/sizeof(buff[0]));
           OD_ASSERT((buff_p + i + ((4 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
-           < buff + sizeof(buff));
+           < buff + sizeof(buff)/sizeof(buff[0]));
           OD_ASSERT((buff_p + i + ((5 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
-           < buff + sizeof(buff));
+           < buff + sizeof(buff)/sizeof(buff[0]));
           /*Load input coeffs from each row, 8 shorts at one time.*/
           row0_src = _mm_loadu_si128((__m128i *)
-           (buff_p + i + ((0 - OD_SUBPEL_TOP_APRON_SZ) << log_xblk_sz)));
+           (buff_p + i + (0 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz)));
           row1_src = _mm_loadu_si128((__m128i *)
-           (buff_p + i + ((1 - OD_SUBPEL_TOP_APRON_SZ) << log_xblk_sz)));
+           (buff_p + i + (1 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz)));
           row2_src = _mm_loadu_si128((__m128i *)
-           (buff_p + i + ((2 - OD_SUBPEL_TOP_APRON_SZ) << log_xblk_sz)));
+           (buff_p + i + (2 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz)));
           row3_src = _mm_loadu_si128((__m128i *)
-           (buff_p + i + ((3 - OD_SUBPEL_TOP_APRON_SZ) << log_xblk_sz)));
+           (buff_p + i + (3 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz)));
           row4_src = _mm_loadu_si128((__m128i *)
-           (buff_p + i + ((4 - OD_SUBPEL_TOP_APRON_SZ) << log_xblk_sz)));
+           (buff_p + i + (4 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz)));
           row5_src = _mm_loadu_si128((__m128i *)
-           (buff_p + i + ((5 - OD_SUBPEL_TOP_APRON_SZ) << log_xblk_sz)));
+           (buff_p + i + (5 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz)));
           /*Row 0 and 1 together.*/
           row01_lo = _mm_unpacklo_epi16(row0_src, row1_src);
           row01_hi = _mm_unpackhi_epi16(row0_src, row1_src);
@@ -541,17 +569,357 @@ void od_mc_predict1fmv8_sse2(unsigned char *dst,const unsigned char *src,
   }
   /*MC with full-pel MV, i.e. integer position.*/
   else {
-    for (j = 0; j < yblk_sz; j++) {
-      OD_COPY(dst_p, src_p, xblk_sz);
-      src_p += systride;
-      dst_p += xblk_sz;
-    }
+    OD_ASSERT(log_xblk_sz == log_yblk_sz);
+    (*state->opt_vtbl.od_copy_nxn[log_xblk_sz])(dst_p, xblk_sz, src_p,
+     systride);
   }
 #if defined(OD_CHECKASM)
-  od_mc_predict1fmv8_check(dst, src, systride, mvx, mvy,
+  od_mc_predict1fmv8_check(state, dst, src, systride, mvx, mvy,
    log_xblk_sz, log_yblk_sz);
-  /*fprintf(stderr,"od_mc_predict1fmv8 %ix%i check finished.\n",
-   1<<_log_xblk_sz,1<<_log_yblk_sz);*/
+#endif
+}
+
+OD_SIMD_INLINE __m128i od_mc_multiply_reduce_add_horizontal16_4(
+ __m128i src_vec0, __m128i src_vec1, __m128i fx01, __m128i fx23, __m128i fx45) {
+  __m128i src8pels;
+  __m128i sums;
+  __m128i madd01;
+  __m128i madd23;
+  __m128i madd45;
+  /*Create a pattern of 0,1, 1,2, 2,3 ... 7,8 by unpacking.
+    Multiply by each set of filters and then add the two horizontally adjacent
+     products together.
+    This results in 4 32 bit integers.
+    Perform these operations for each pair of filter values.*/
+  src8pels = _mm_unpacklo_epi16(src_vec0, src_vec1);
+  madd01 = _mm_madd_epi16(fx01, src8pels);
+  /*The src data that is to be multiplied by the final filters can be obtained
+     by unpacking the upper values of the vector we begin with instead
+     of shifting.*/
+  src8pels = _mm_unpackhi_epi16(src_vec0, src_vec1);
+  madd45 = _mm_madd_epi16(fx45, src8pels);
+  src_vec0 = _mm_srli_si128(src_vec0, 4);
+  src_vec1 = _mm_srli_si128(src_vec1, 4);
+  src8pels = _mm_unpacklo_epi16(src_vec0, src_vec1);
+  madd23 = _mm_madd_epi16(fx23, src8pels);
+  /*Subtract from one of the summands instead of the final value to avoid
+    data hazards.*/
+  madd01 = _mm_sub_epi32(madd01,
+   _mm_set1_epi32(128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE)));
+  /*Sum together the 3 summands.*/
+  sums = _mm_add_epi32(madd01, madd23);
+  sums = _mm_add_epi32(sums, madd45);
+  /*Subtraction would occur here if it wasn't performed earlier.*/
+  return sums;
+}
+
+OD_SIMD_INLINE void od_mc_predict1fmv16_horizontal_nxm(int32_t *buff_p,
+ const unsigned char *src_p, int systride, int mvxf, int mvyf,
+ const int xblk_sz, const int yblk_sz) {
+  int i;
+  int j;
+  if (mvxf) {
+    __m128i fx01;
+    __m128i fx23;
+    __m128i fx45;
+    od_setup_alternating_filter_variables(&fx01, &fx23, &fx45, mvxf);
+    j = -OD_SUBPEL_TOP_APRON_SZ;
+    /*The mvy is of integer position*/
+    if (!mvyf) {
+      /*Change j such that the loop is done yblk_sz times.*/
+      j = OD_SUBPEL_TOP_APRON_SZ;
+      buff_p += xblk_sz*OD_SUBPEL_TOP_APRON_SZ;
+      src_p += systride*OD_SUBPEL_TOP_APRON_SZ;
+    }
+    for (; j < yblk_sz + OD_SUBPEL_BOTTOM_APRON_SZ; j++) {
+      for (i = 0; i < xblk_sz; i += 4) {
+        __m128i src0;
+        __m128i src1;
+        __m128i sums;
+        /*One extra element is needed to perform the filter on 4 elements when
+           working on 12 bit data.
+          Two overlapping vectors are loaded to deal with this.*/
+        src0 = _mm_loadu_si128(
+         (__m128i *)(((int16_t *)src_p) + i - OD_SUBPEL_TOP_APRON_SZ));
+        src1 = _mm_loadu_si128(
+         (__m128i *)(((int16_t *)src_p) + i + 1 - OD_SUBPEL_TOP_APRON_SZ));
+        sums = od_mc_multiply_reduce_add_horizontal16_4(src0, src1,
+         fx01, fx23, fx45);
+        /*Only store as many values as xblk_sz.*/
+        if (xblk_sz >= 4) {
+          OD_ASSERT(i + 4 <= xblk_sz);
+          _mm_storeu_si128((__m128i *)(buff_p + i), sums);
+        }
+        else {
+          OD_ASSERT(i + 2 <= xblk_sz);
+          _mm_storel_epi64((__m128i *)(buff_p + i), sums);
+        }
+      }
+      src_p += systride;
+      buff_p += xblk_sz;
+    }
+  }
+  /*The mvx is of integer position.*/
+  else {
+    __m128i normalize_128;
+    normalize_128 = _mm_set1_epi16(128 << OD_COEFF_SHIFT);
+    for (j = -OD_SUBPEL_TOP_APRON_SZ;
+     j < yblk_sz + OD_SUBPEL_BOTTOM_APRON_SZ; j++) {
+      for (i = 0; i < xblk_sz; i += 4) {
+        __m128i tmp;
+        __m128i src8pels;
+        tmp = _mm_loadl_epi64((__m128i *)(((int16_t *)src_p) + i));
+        tmp = _mm_sub_epi16(tmp, normalize_128);
+        /*To retain the sign, unpack in reverse order and shift right instead
+           of left.*/
+        src8pels = _mm_unpacklo_epi16(_mm_setzero_si128(), tmp);
+        src8pels = _mm_srai_epi32(src8pels, 16 - OD_SUBPEL_COEFF_SCALE);
+        /*Only store as many values as xblk_sz.*/
+        if (xblk_sz >= 4)  {
+          _mm_store_si128((__m128i *)(buff_p + i), src8pels);
+        }
+        else if (xblk_sz >= 2) {
+          OD_ASSERT(i + 2 <= xblk_sz);
+          _mm_storel_epi64((__m128i *)(buff_p + i), src8pels);
+        }
+      }
+      src_p += systride;
+      buff_p += xblk_sz;
+    }
+  }
+}
+
+static void od_mc_predict1fmv16_horizontal_2x2(int32_t *buff_p,
+ const unsigned char *src_p, int systride, int mvxf, int mvyf) {
+  od_mc_predict1fmv16_horizontal_nxm(buff_p, src_p, systride, mvxf, mvyf, 2, 2);
+}
+
+static void od_mc_predict1fmv16_horizontal_4x4(int32_t *buff_p,
+ const unsigned char *src_p, int systride, int mvxf, int mvyf) {
+  od_mc_predict1fmv16_horizontal_nxm(buff_p, src_p, systride, mvxf, mvyf, 4, 4);
+}
+
+static void od_mc_predict1fmv16_horizontal_8x8(int32_t *buff_p,
+ const unsigned char *src_p, int systride, int mvxf, int mvyf) {
+  od_mc_predict1fmv16_horizontal_nxm(buff_p, src_p, systride, mvxf, mvyf, 8, 8);
+}
+
+static void od_mc_predict1fmv16_horizontal_16x16(int32_t *buff_p,
+ const unsigned char *src_p, int systride, int mvxf, int mvyf) {
+  od_mc_predict1fmv16_horizontal_nxm(buff_p, src_p, systride, mvxf, mvyf,
+   16, 16);
+}
+
+static void od_mc_predict1fmv16_horizontal_32x32(int32_t *buff_p,
+ const unsigned char *src_p, int systride, int mvxf, int mvyf) {
+  od_mc_predict1fmv16_horizontal_nxm(buff_p, src_p, systride, mvxf, mvyf,
+   32, 32);
+}
+
+static void od_mc_predict1fmv16_horizontal_64x64(int32_t *buff_p,
+ const unsigned char *src_p, int systride, int mvxf, int mvyf) {
+  od_mc_predict1fmv16_horizontal_nxm(buff_p, src_p, systride, mvxf, mvyf,
+   64, 64);
+}
+
+typedef void (*od_mc_predict1fmv16_horizontal_fixed_func)(int32_t *buff_p,
+ const unsigned char *src_p, int systride, int mvxf, int mvyf);
+
+void od_mc_predict1fmv16_sse2(od_state *state, unsigned char *dst,
+ const unsigned char *src, int systride, int32_t mvx, int32_t mvy,
+ int log_xblk_sz, int log_yblk_sz) {
+  static const od_mc_predict1fmv16_horizontal_fixed_func
+   VTBL_HORIZONTAL[OD_LOG_MVBSIZE_MAX] = {
+    od_mc_predict1fmv16_horizontal_2x2, od_mc_predict1fmv16_horizontal_4x4,
+    od_mc_predict1fmv16_horizontal_8x8, od_mc_predict1fmv16_horizontal_16x16,
+    od_mc_predict1fmv16_horizontal_32x32, od_mc_predict1fmv16_horizontal_64x64
+  };
+  int mvxf;
+  int mvyf;
+  int xblk_sz;
+  int yblk_sz;
+  int xstride;
+  int i;
+  int j;
+  /*Pointer to the start of an image block in local buffer (defined
+     below, buff[]), where the buffer contains the top and bottom apron
+     area of the image block.
+    Used as output for 1st stage horizontal filtering then as input for
+     2nd stage vertical filtering.*/
+  int32_t *buff_p;
+  /*A pointer to input row for both 1st and 2nd stage filtering.*/
+  const unsigned char *src_p;
+  unsigned char *dst_p;
+  const int16_t *fy;
+  /*2D buffer to store the result of 1st stage (i.e. horizontal) 1D filtering
+     of a block. The 1st stage filtering requires to output results for
+     top and bottom aprons of input image block, because the 2nd stage
+     filtering (i.e vertical) requires support region on those apron pixels.
+    The size of the buffer is :
+     wxh = OD_MVBSIZE_MAX x (OD_MVBSIZE_MAX + BUFF_APRON_SZ).*/
+  int32_t buff[(OD_MVBSIZE_MAX + OD_SUBPEL_BUFF_APRON_SZ)
+   *OD_MVBSIZE_MAX + 16];
+  xblk_sz = 1 << log_xblk_sz;
+  yblk_sz = 1 << log_yblk_sz;
+  xstride = 2;
+  src_p = src + (mvx >> 3)*xstride + (mvy >> 3)*systride;
+  dst_p = dst;
+  /*Fetch LSB 3 bits, i.e. fractional MV.*/
+  mvxf = mvx & 0x07;
+  mvyf = mvy & 0x07;
+  /*Check whether mvxf and mvyf are in the range [0...7],
+     i.e. downto 1/8 precision.*/
+  OD_ASSERT(mvxf <= 7);
+  OD_ASSERT(mvyf <= 7);
+  fy = OD_SUBPEL_FILTER_SET[mvyf];
+  /*MC with subpel MV?*/
+  if (mvxf || mvyf) {
+    /*1st stage 1D filtering, Horizontal.*/
+    buff_p = buff;
+    src_p -= systride*OD_SUBPEL_TOP_APRON_SZ;
+    OD_ASSERT(log_xblk_sz == log_yblk_sz);
+    (*VTBL_HORIZONTAL[log_xblk_sz - 1])(buff_p, src_p, systride, mvxf, mvyf);
+    /*2nd stage 1D filtering, Vertical.*/
+    buff_p = buff + xblk_sz*OD_SUBPEL_TOP_APRON_SZ;
+    if (mvyf) {
+      __m128i fy0;
+      __m128i fy1;
+      __m128i fy2;
+      __m128i fy3;
+      __m128i fy4;
+      __m128i fy5;
+      fy0 = _mm_set1_epi32(fy[0]);
+      fy1 = _mm_set1_epi32(fy[1]);
+      fy2 = _mm_set1_epi32(fy[2]);
+      fy3 = _mm_set1_epi32(fy[3]);
+      fy4 = _mm_set1_epi32(fy[4]);
+      fy5 = _mm_set1_epi32(fy[5]);
+      for (j = 0; j < yblk_sz; j++) {
+        for (i = 0; i < xblk_sz; i += 4) {
+          __m128i row0;
+          __m128i row1;
+          __m128i row2;
+          __m128i row3;
+          __m128i row4;
+          __m128i row5;
+          __m128i sums_even;
+          __m128i sums_odd;
+          __m128i sums;
+          __m128i out;
+          OD_ASSERT((buff_p + i + ((0 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
+           < buff + sizeof(buff)/sizeof(buff[0]));
+          OD_ASSERT((buff_p + i + ((1 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
+           < buff + sizeof(buff)/sizeof(buff[0]));
+          OD_ASSERT((buff_p + i + ((2 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
+           < buff + sizeof(buff)/sizeof(buff[0]));
+          OD_ASSERT((buff_p + i + ((3 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
+           < buff + sizeof(buff)/sizeof(buff[0]));
+          OD_ASSERT((buff_p + i + ((4 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
+           < buff + sizeof(buff)/sizeof(buff[0]));
+          OD_ASSERT((buff_p + i + ((5 - OD_SUBPEL_TOP_APRON_SZ)*xblk_sz) + 15)
+           < buff + sizeof(buff)/sizeof(buff[0]));
+          /*Load input coeffs from each row, 4 32-bit integers at one time.*/
+          row0 = _mm_loadu_si128((__m128i *)
+           (buff_p + i + (0 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz)));
+          row1 = _mm_loadu_si128((__m128i *)
+           (buff_p + i + (1 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz)));
+          row2 = _mm_loadu_si128((__m128i *)
+           (buff_p + i + (2 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz)));
+          row3 = _mm_loadu_si128((__m128i *)
+           (buff_p + i + (3 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz)));
+          row4 = _mm_loadu_si128((__m128i *)
+           (buff_p + i + (4 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz)));
+          row5 = _mm_loadu_si128((__m128i *)
+           (buff_p + i + (5 - OD_SUBPEL_TOP_APRON_SZ)*(1 << log_xblk_sz)));
+          /*Multiply each row with the cooresponding filter value and add
+             the products together.
+            Products and product sums are split into even and odd groups due
+             the use of _mm_mul_epu32.*/
+          sums_even = _mm_mul_epu32(row0, fy0);
+          sums_odd = _mm_mul_epu32(_mm_srli_si128(row0, 4), fy0);
+          sums_even = _mm_add_epi32(sums_even, _mm_mul_epu32(row1, fy1));
+          sums_odd = _mm_add_epi32(sums_odd,
+           _mm_mul_epu32(_mm_srli_si128(row1, 4), fy1));
+          sums_even = _mm_add_epi32(sums_even, _mm_mul_epu32(row2, fy2));
+          sums_odd = _mm_add_epi32(sums_odd,
+           _mm_mul_epu32(_mm_srli_si128(row2, 4), fy2));
+          sums_even = _mm_add_epi32(sums_even, _mm_mul_epu32(row3, fy3));
+          sums_odd = _mm_add_epi32(sums_odd,
+           _mm_mul_epu32(_mm_srli_si128(row3, 4), fy3));
+          sums_even = _mm_add_epi32(sums_even, _mm_mul_epu32(row4, fy4));
+          sums_odd = _mm_add_epi32(sums_odd,
+           _mm_mul_epu32(_mm_srli_si128(row4, 4), fy4));
+          sums_even = _mm_add_epi32(sums_even, _mm_mul_epu32(row5, fy5));
+          sums_odd = _mm_add_epi32(sums_odd,
+           _mm_mul_epu32(_mm_srli_si128(row5, 4), fy5));
+          /*Combine the even and odd product sums.
+            Found in this thread:
+             software.intel.com/en-us/forums/intel-c-compiler/topic/288768*/
+          sums = _mm_unpacklo_epi32(
+           _mm_shuffle_epi32(sums_even, _MM_SHUFFLE(0, 0, 2, 0)),
+           _mm_shuffle_epi32(sums_odd, _MM_SHUFFLE(0, 0, 2, 0)));
+          /*Scale down while rounding and recenter.*/
+          sums = _mm_add_epi32(sums,
+           _mm_set1_epi32((1 << OD_SUBPEL_COEFF_SCALE2 >> 1) +
+           (128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE2))));
+          sums = _mm_srai_epi32(sums, OD_SUBPEL_COEFF_SCALE2);
+          out = _mm_packs_epi32(sums, sums);
+          /*Clamp to 12 bit range.*/
+          out = _mm_min_epi16(out,
+           _mm_set1_epi16((1 << (8 + OD_COEFF_SHIFT)) - 1));
+          out = _mm_max_epi16(out, _mm_set1_epi16(0));
+          if (xblk_sz >= 4) {
+            OD_ASSERT(i + 4 <= xblk_sz);
+            _mm_storel_epi64((__m128i *)(((int16_t *)dst_p) + i), out);
+          }
+          else {
+            OD_ASSERT(i + 2 <= xblk_sz);
+            *((uint32_t *)(((int16_t *)dst_p) + i)) = _mm_cvtsi128_si32(out);
+          }
+        }
+        buff_p += xblk_sz;
+        dst_p += xblk_sz*xstride;
+      }
+    }
+    /*The mvy is in integer position.*/
+    else {
+      for (j = 0; j < yblk_sz; j++) {
+        for (i = 0; i < xblk_sz; i += 4) {
+          __m128i p;
+          p = _mm_loadu_si128((__m128i *)(buff_p + i));
+          /*Scale down while rounding and recenter.*/
+          p = _mm_add_epi32(p,
+           _mm_set1_epi32((1 << OD_SUBPEL_COEFF_SCALE >> 1) +
+           (128 << (OD_COEFF_SHIFT + OD_SUBPEL_COEFF_SCALE))));
+          p = _mm_srai_epi32(p, OD_SUBPEL_COEFF_SCALE);
+          p = _mm_packs_epi32(p, p);
+          /*Clamp to 12 bit range.*/
+          p = _mm_min_epi16(p,
+           _mm_set1_epi16((1 << (8 + OD_COEFF_SHIFT)) - 1));
+          p = _mm_max_epi16(p, _mm_set1_epi16(0));
+          if (xblk_sz >= 4) {
+            OD_ASSERT(i + 4 <= xblk_sz);
+            _mm_storel_epi64((__m128i *)(((int16_t *)dst_p) + i), p);
+          }
+          else {
+            OD_ASSERT(i + 2 <= xblk_sz);
+            *((uint32_t *)(((int16_t *)dst_p) + i)) = _mm_cvtsi128_si32(p);
+          }
+        }
+        buff_p += xblk_sz;
+        dst_p += xblk_sz*xstride;
+      }
+    }
+  }
+  /*MC with full-pel MV, i.e. integer position.*/
+  else {
+    OD_ASSERT(log_xblk_sz == log_yblk_sz);
+    (*state->opt_vtbl.od_copy_nxn[log_xblk_sz])(dst_p, xblk_sz << 1, src_p,
+     systride);
+  }
+#if defined(OD_CHECKASM)
+  od_mc_predict1fmv16_check(state, dst, src, systride, mvx, mvy,
+   log_xblk_sz, log_yblk_sz);
 #endif
 }
 
@@ -596,7 +964,7 @@ static void od_mc_blend_full8_check(unsigned char *_dst,int _dystride,
 #define OD_IM_LOAD16 \
   "#OD_IM_LOAD16\n\t" \
   "mov (%[src]),%[a]\n\t" \
-  "movdqa (%[a],%[row]),%%xmm0\n\t" \
+  "movdqa (%[a],%[row],4),%%xmm0\n\t" \
   /*The "c" prefix here means to leave off the leading $ normally used for \
      immediates (since we want to move from an address, not an immediate). \
     Currently, this is not documented in the gcc manual, and my editor doesn't \
@@ -607,11 +975,11 @@ static void od_mc_blend_full8_check(unsigned char *_dst,int _dystride,
     I found it on this thread: \
      http://gcc.gnu.org/ml/gcc-help/2006-09/msg00301.html*/ \
   "mov %c[pstride](%[src]),%[a]\n\t" \
-  "movdqa (%[a],%[row]),%%xmm1\n\t" \
+  "movdqa (%[a],%[row],4),%%xmm1\n\t" \
   "mov %c[pstride]*3(%[src]),%[a]\n\t" \
-  "movdqa (%[a],%[row]),%%xmm2\n\t" \
+  "movdqa (%[a],%[row],4),%%xmm2\n\t" \
   "mov %c[pstride]*2(%[src]),%[a]\n\t" \
-  "movdqa (%[a],%[row]),%%xmm3\n\t" \
+  "movdqa (%[a],%[row],4),%%xmm3\n\t" \
 
 /*Unpacks an 8-bit register into two 16-bit registers.
   _rega: The input register, which will contain the low-order output.
@@ -650,41 +1018,50 @@ static void od_mc_blend_full8_check(unsigned char *_dst,int _dystride,
   "paddw " _reg1b "," _reg0b "\n\t" \
 
 /*Bilinearly blends 2 pairs of 16-bit registers and rounds, shifts, and packs
-  the result in an 8-bit register. This is a special case version that
-  handles overflow in 32x32 blocks.
+  the result in an 8-bit register. This is a special case version of
+  OD_IM_BLEND that handles 16-bit overflow.
   It implements the following expression:
-    ((a << 5) + (b - a)*scale + (1 << 9)) >> 10
-  The ((b - a)*scale) expression overflows a 16-bit integer, so we need
-   to rewrite it as
-    (a + (((b - a) * (scale << 11)) >> 16) + (1 << 4)) >> 5
+   ((a << x) + (b - a) * scale + (1 << (y - 1))) >> y
+  Expressions (a << x) and ((b - a)*scale) can potentially overflow 16-bit
+   integers, so we need to rewrite them as
+    (a + (((b - a) * (scale << (16 - x))) >> 16) + (1 << (y - 1 - x)))
+     >> (y - x)
    in order to use pmulhw
-    (a + (pmulhw((b - a), (scale << 11))) + (1 << 4)) >> 5
-  The (scale << 11) expression can overflow a signed 16-bit integer, and
-   there is no signed-unsigned multiply instruction, so we further
-   rewrite it as
-    (a + (pmulhw((b - a) << 1, (scale << 10))) + (1 << 4)) >> 5
+    (a + (pmulhw((b - a), (scale << (16 - x)))) + (1 << (y - 1 - x)))
+     >> (y - x)
+  The (scale << (16 - x)) expression can also overflow a signed 16-bit
+   integer, and there is no signed-unsigned multiply instruction, so we
+   further rewrite it as
+    (a + (pmulhw((b - a) << w, (scale << (16 - x - w)))) + (1 << (y - 1 - x)))
+     >> (y - x)
 
   _reg0a:  The low-order register of the first pair, which will contain the
             output.
   _reg0b:  The high-order register of the first pair.
   _reg1a:  The low-order register of the second pair.
   _reg1b:  The high-order register of the second pair.
-  _scale:  The weights to apply to the low-order and high-order registers.*/
-#define OD_IM_BLEND_AND_PACK_32(_reg0a,_reg0b,_reg1a,_reg1b,_scale) \
-  "#OD_IM_BLEND_AND_PACK_32\n\t" \
+  _scale:  The weights to apply to the low-order and high-order registers.
+  _x:      Precision of the weights.
+  _y:      Pack shift amount.
+  _z:      Used to prevent overflow. Callers of this macro must choose a value
+           for z such that ((b - a) << w) and (scale << (16 - x - w)) don't
+           overflow 16-bit registers.
+  */
+#define OD_IM_BLEND_AND_PACK(_reg0a,_reg0b,_reg1a,_reg1b,_scale,_x,_y,_z) \
+  "#OD_IM_BLEND_AND_PACK\n\t" \
   "psubw " _reg0a "," _reg1a "\n\t" \
   "psubw " _reg0b "," _reg1b "\n\t" \
-  "psllw $1," _reg1a "\n\t" \
-  "psllw $1," _reg1b "\n\t" \
-  "psllw $10," _scale "\n\t" \
+  "psllw $" _z "," _reg1a "\n\t" \
+  "psllw $" _z "," _reg1b "\n\t" \
+  "psllw $16-" _x "-" _z "," _scale "\n\t" \
   "pmulhw " _scale "," _reg1a "\n\t" \
   "pmulhw " _scale "," _reg1b "\n\t" \
   "paddw " _reg1a "," _reg0a "\n\t" \
   "paddw " _reg1b "," _reg0b "\n\t" \
   "pcmpeqw %%xmm1,%%xmm1\n\t" \
   "psubw %%xmm1,%%xmm7\n\t" \
-  "psllw $4,%%xmm7\n\t" \
-  OD_IM_PACK(_reg0a,_reg0b,"%%xmm7","$5") \
+  "psllw $" _y "-1-" _x ",%%xmm7\n\t" \
+  OD_IM_PACK(_reg0a,_reg0b,"%%xmm7","$" _y "-" _x) \
 
 /*Rounds, shifts, and packs two 16-bit registers into one 8 bit register.
   _rega:  The low-order register, which will contain the output.
@@ -732,7 +1109,7 @@ static void od_mc_blend_full8_check(unsigned char *_dst,int _dystride,
   "lea %[OD_BIL4V],%[a]\n\t" \
   "psllw $" #_log_yblk_sz "+1,%%xmm7\n\t" \
   OD_IM_BLEND("%%xmm0","%%xmm4","%%xmm2","%%xmm5","$" #_log_yblk_sz, \
-   "(%[a],%[row])","0x10(%[a],%[row])") \
+   "(%[a],%[row],4)","0x10(%[a],%[row],4)") \
   OD_IM_PACK("%%xmm0","%%xmm4","%%xmm7","$" #_log_yblk_sz "+2") \
   /*Get it back out to memory. \
     We have to do this 4 bytes at a time because the destination will not in \
@@ -770,7 +1147,7 @@ static void od_mc_blend_full8_check(unsigned char *_dst,int _dystride,
   "lea %[OD_BILV],%[a]\n\t" \
   "psllw $" #_log_yblk_sz "+2,%%xmm7\n\t" \
   OD_IM_BLEND("%%xmm0","%%xmm4","%%xmm2","%%xmm5","$" #_log_yblk_sz, \
-   "(%[a],%[row],2)","0x10(%[a],%[row],2)") \
+   "(%[a],%[row],8)","0x10(%[a],%[row],8)") \
   OD_IM_PACK("%%xmm0","%%xmm4","%%xmm7","$" #_log_yblk_sz "+3") \
   /*Get it back out to memory. \
     We have to do this 8 bytes at a time because the destination will not in \
@@ -800,7 +1177,7 @@ static void od_mc_blend_full8_check(unsigned char *_dst,int _dystride,
   "pcmpeqw %%xmm1,%%xmm1\n\t" \
   "lea %[OD_BILV],%[a]\n\t" \
   "psubw %%xmm1,%%xmm7\n\t" \
-  "movdqa (%[a],%[row]),%%xmm6\n\t" \
+  "movdqa (%[a],%[row],4),%%xmm6\n\t" \
   "psllw $" #_log_yblk_sz "+3,%%xmm7\n\t" \
   OD_IM_BLEND("%%xmm0","%%xmm4","%%xmm2","%%xmm5","$" #_log_yblk_sz, \
    "%%xmm6","%%xmm6") \
@@ -811,26 +1188,61 @@ static void od_mc_blend_full8_check(unsigned char *_dst,int _dystride,
 /*Blends half a row of a 32x32 block. We can't blend an entire row at a time
   in SSE2 so we need to split it two havles.
  _bilh_offset: Offset in the BILH table where to read the weights from.
+ _bilv_offset: Offset in the BILV table where to read the weights from.
  _dst_offset: Offset in the dst pointer where to write the blended row. */
-#define OD_MC_BLEND_FULL8_32_HALF(_bilh_offset, _dst_offset) \
+#define OD_MC_BLEND_FULL8_32_HALF(_bilh_offset, _bilv_offset, _dst_offset) \
   "pxor %%xmm7,%%xmm7\n\t" \
   /*Load the 4 images to blend.*/ \
   OD_IM_LOAD16 \
   /*Unpack and blend the 0 and 1 images.*/ \
   OD_IM_UNPACK("%%xmm0","%%xmm4","%%xmm7") \
   "lea %[OD_BILH],%[a]\n\t" \
-  "lea " _bilh_offset "(%[a]),%[a]\t\n" \
   OD_IM_UNPACK("%%xmm1","%%xmm5","%%xmm7") \
-  "movdqa 0x10(%[a]),%%xmm6\n\t" \
-  OD_IM_BLEND("%%xmm0","%%xmm4","%%xmm1","%%xmm5","$5","(%[a])","%%xmm6") \
+  "movdqa " _bilh_offset "+0x10(%[a]),%%xmm6\n\t" \
+  OD_IM_BLEND("%%xmm0","%%xmm4","%%xmm1","%%xmm5","$5", \
+   _bilh_offset "(%[a])","%%xmm6") \
   /*Unpack and blend the 2 and 3 images.*/ \
   OD_IM_UNPACK("%%xmm2","%%xmm5","%%xmm7") \
   OD_IM_UNPACK("%%xmm3","%%xmm1","%%xmm7") \
-  OD_IM_BLEND("%%xmm2","%%xmm5","%%xmm3","%%xmm1","$5","(%[a])","%%xmm6") \
+  OD_IM_BLEND("%%xmm2","%%xmm5","%%xmm3","%%xmm1","$5", \
+   _bilh_offset "(%[a])","%%xmm6") \
   /*Blend, shift, and re-pack images 0+1 and 2+3.*/ \
-  "lea %[OD_BIL16V],%[a]\n\t" \
-  "movdqa (%[a],%[row]),%%xmm6\n\t" \
-  OD_IM_BLEND_AND_PACK_32("%%xmm0","%%xmm4","%%xmm2","%%xmm5","%%xmm6") \
+  "lea %[OD_BILV],%[a]\n\t" \
+  "movdqa " _bilv_offset "(%[a],%[row],2),%%xmm6\n\t" \
+  OD_IM_BLEND_AND_PACK("%%xmm0","%%xmm4","%%xmm2","%%xmm5","%%xmm6", \
+   "5","10","1") \
+  /*Get it back out to memory.*/ \
+  "movdqa %%xmm0," _dst_offset "(%[dst])\n\t" \
+
+/*Blends a quarter of a row of a 64x64 block.
+  We can't blend an entire row at a time in SSE2 so we need to split it four
+   quarters.
+  _bilh_offset: Offset in the BILH table where to read the weights from.
+  _bilv_offset: Offset in the BILV table where to read the weights from.
+  _dst_offset: Offset in the dst pointer where to write the blended row.*/
+#define OD_MC_BLEND_FULL8_64_QUARTER(_bilh_offset, _bilv_offset, _dst_offset) \
+  "pxor %%xmm7,%%xmm7\n\t" \
+  /*Load the 4 images to blend.*/ \
+  OD_IM_LOAD16 \
+  /*Unpack and blend the 0 and 1 images.*/ \
+  OD_IM_UNPACK("%%xmm0","%%xmm4","%%xmm7") \
+  "lea %[OD_BILH],%[a]\n\t" \
+  OD_IM_UNPACK("%%xmm1","%%xmm5","%%xmm7") \
+  "movdqa " _bilh_offset "+0x10(%[a]),%%xmm6\n\t" \
+  OD_IM_BLEND("%%xmm0","%%xmm4","%%xmm1","%%xmm5","$6", \
+   _bilh_offset "(%[a])","%%xmm6") \
+  /*Unpack and blend the 2 and 3 images.*/ \
+  OD_IM_UNPACK("%%xmm2","%%xmm5","%%xmm7") \
+  OD_IM_UNPACK("%%xmm3","%%xmm1","%%xmm7") \
+  OD_IM_BLEND("%%xmm2","%%xmm5","%%xmm3","%%xmm1","$6", \
+   _bilh_offset "(%[a])","%%xmm6") \
+  /*Blend, shift, and re-pack images 0+1 and 2+3.*/ \
+  "lea %[OD_BILV],%[a]\n\t" \
+  "movdqa " _bilv_offset "(%[a],%[row]),%%xmm6\n\t" \
+  /*(b - a) << w requires 8 + 6 + 1 + 1 == 16 bits (signed). \
+    scale << (16 - x - w) requires 6 + (16 - 6 - 1) == 15 bits (unsigned).*/ \
+  OD_IM_BLEND_AND_PACK("%%xmm0","%%xmm4","%%xmm2","%%xmm5","%%xmm6", \
+   "6","12","1") \
   /*Get it back out to memory.*/ \
   "movdqa %%xmm0," _dst_offset "(%[dst])\n\t" \
 
@@ -912,10 +1324,11 @@ static void od_mc_blend_full8_4x8(unsigned char *_dst,int _dystride,
      how to put that in a macro).
     row can't count by 1, because (in the 8x2 versions below) we will need to
      scale it by either 16 or 32, and an index register can only be scaled by
-     16.
-    Therefore we pre-scale it by 16, and do so everywhere (even for the 4x4 and
+     16, and in the 32x32 and 64x64 versions we will want to scale it by 1/2
+     and 1/4 (respectively) to reduce the size of our tables.
+    Therefore we pre-scale it by 4, and do so everywhere (even for the 4x4 and
      8x2 versions) so that things are consistent.*/
-  for(row=0;row<0x20;row+=0x10){
+  for(row=0;row<8;row+=4){
     __asm__ __volatile__(
       OD_MC_BLEND_FULL8_4x4(3)
       "lea (%[dst],%[dystride],4),%[dst]\t\n"
@@ -931,7 +1344,7 @@ static void od_mc_blend_full8_4x16(unsigned char *_dst,int _dystride,
  const unsigned char *_src[4]){
   ptrdiff_t a;
   ptrdiff_t row;
-  for(row=0;row<0x40;row+=0x10){
+  for(row=0;row<16;row+=4){
     __asm__ __volatile__(
       OD_MC_BLEND_FULL8_4x4(4)
       "lea (%[dst],%[dystride],4),%[dst]\t\n"
@@ -961,7 +1374,7 @@ static void od_mc_blend_full8_8x4(unsigned char *_dst,int _dystride,
  const unsigned char *_src[4]){
   ptrdiff_t a;
   ptrdiff_t row;
-  for(row=0;row<0x20;row+=0x10){
+  for(row=0;row<8;row+=4){
     __asm__ __volatile__(
       OD_MC_BLEND_FULL8_8x2(2)
       "lea (%[dst],%[dystride],2),%[dst]\t\n"
@@ -977,7 +1390,7 @@ static void od_mc_blend_full8_8x8(unsigned char *_dst,int _dystride,
  const unsigned char *_src[4]){
   ptrdiff_t a;
   ptrdiff_t row;
-  for(row=0;row<0x40;row+=0x10){
+  for(row=0;row<8*8/4;row+=4){
     __asm__ __volatile__(
       OD_MC_BLEND_FULL8_8x2(3)
       "lea (%[dst],%[dystride],2),%[dst]\t\n"
@@ -993,7 +1406,7 @@ static void od_mc_blend_full8_8x16(unsigned char *_dst,int _dystride,
  const unsigned char *_src[4]){
   ptrdiff_t a;
   ptrdiff_t row;
-  for(row=0;row<0x80;row+=0x10){
+  for(row=0;row<8*16/4;row+=4){
     __asm__ __volatile__(
       OD_MC_BLEND_FULL8_8x2(4)
       "lea (%[dst],%[dystride],2),%[dst]\t\n"
@@ -1021,7 +1434,7 @@ static void od_mc_blend_full8_16x2(unsigned char *_dst,int _dystride,
  const unsigned char *_src[4]){
   ptrdiff_t a;
   ptrdiff_t row;
-  for(row=0;row<0x20;row+=0x10){
+  for(row=0;row<16*2/4;row+=4){
     __asm__ __volatile__(
       OD_MC_BLEND_FULL8_16x1(1)
       "lea (%[dst],%[dystride]),%[dst]\t\n"
@@ -1037,7 +1450,7 @@ static void od_mc_blend_full8_16x4(unsigned char *_dst,int _dystride,
  const unsigned char *_src[4]){
   ptrdiff_t a;
   ptrdiff_t row;
-  for(row=0;row<0x40;row+=0x10){
+  for(row=0;row<16;row+=4){
     __asm__ __volatile__(
       OD_MC_BLEND_FULL8_16x1(2)
       "lea (%[dst],%[dystride]),%[dst]\t\n"
@@ -1053,7 +1466,7 @@ static void od_mc_blend_full8_16x8(unsigned char *_dst,int _dystride,
  const unsigned char *_src[4]){
   ptrdiff_t a;
   ptrdiff_t row;
-  for(row=0;row<0x80;row+=0x10){
+  for(row=0;row<16*8/4;row+=4){
     __asm__ __volatile__(
       OD_MC_BLEND_FULL8_16x1(3)
       "lea (%[dst],%[dystride]),%[dst]\t\n"
@@ -1069,7 +1482,7 @@ static void od_mc_blend_full8_16x16(unsigned char *_dst,int _dystride,
  const unsigned char *_src[4]){
   ptrdiff_t a;
   ptrdiff_t row;
-  for(row=0;row<0x100;row+=0x10){
+  for(row=0;row<16*16/4;row+=4){
     __asm__ __volatile__(
       OD_MC_BLEND_FULL8_16x1(4)
       "lea (%[dst],%[dystride]),%[dst]\t\n"
@@ -1085,17 +1498,43 @@ static void od_mc_blend_full8_32x32(unsigned char *_dst,int _dystride,
  const unsigned char *_src[4]){
   ptrdiff_t a;
   ptrdiff_t row;
-  for(row=0;row<0x400;row+=0x10){
+  for(row=0;row<32*32/4;row+=4){
     __asm__ __volatile__(
       /*First 16 bytes.*/ \
-      OD_MC_BLEND_FULL8_32_HALF("0x00","0x00") \
+      OD_MC_BLEND_FULL8_32_HALF("0x00","0","0x00") \
       /*Second 16 bytes.*/ \
-      "lea 0x10(%[row]),%[row]\t\n" \
-      OD_MC_BLEND_FULL8_32_HALF("0x20","0x10") \
+      "lea 4(%[row]),%[row]\t\n" \
+      OD_MC_BLEND_FULL8_32_HALF("0x20","-8","0x10") \
       "lea (%[dst],%[dystride]),%[dst]\t\n"
       :[dst]"+r"(_dst),[row]"+r"(row),[a]"=&r"(a)
       :[src]"r"(_src),[dystride]"r"((ptrdiff_t)_dystride),
-       [OD_BILH]"m"(*OD_BILH),[OD_BIL16V]"m"(*OD_BIL16V),
+       [OD_BILH]"m"(*OD_BILH),[OD_BILV]"m"(*OD_BILV),
+       [pstride]"i"(sizeof(*_src))
+    );
+  }
+}
+
+static void od_mc_blend_full8_64x64(unsigned char *_dst,int _dystride,
+ const unsigned char *_src[4]){
+  ptrdiff_t a;
+  ptrdiff_t row;
+  for(row=0;row<64*64/4;row+=4){
+    __asm__ __volatile__(
+      /*First 16 bytes.*/ \
+      OD_MC_BLEND_FULL8_64_QUARTER("0x00","0","0x00") \
+      /*Second 16 bytes.*/ \
+      "lea 4(%[row]),%[row]\t\n" \
+      OD_MC_BLEND_FULL8_64_QUARTER("0x20","-4","0x10") \
+      /*Third 16 bytes.*/ \
+      "lea 4(%[row]),%[row]\t\n" \
+      OD_MC_BLEND_FULL8_64_QUARTER("0x40","-8","0x20") \
+      /*Fourth 16 bytes.*/ \
+      "lea 4(%[row]),%[row]\t\n" \
+      OD_MC_BLEND_FULL8_64_QUARTER("0x60","-12","0x30") \
+      "lea (%[dst],%[dystride]),%[dst]\t\n"
+      :[dst]"+r"(_dst),[row]"+r"(row),[a]"=&r"(a)
+      :[src]"r"(_src),[dystride]"r"((ptrdiff_t)_dystride),
+       [OD_BILH]"m"(*OD_BILH),[OD_BILV]"m"(*OD_BILV),
        [pstride]"i"(sizeof(*_src))
     );
   }
@@ -1139,6 +1578,9 @@ void od_mc_blend_full8_sse2(unsigned char *_dst,int _dystride,
       If you need one of them, add another OD_MC_BLEND_FULL8_C() line above.*/
     {
       NULL, NULL, NULL, NULL, NULL, od_mc_blend_full8_32x32
+    },
+    {
+      NULL, NULL, NULL, NULL, NULL, NULL, od_mc_blend_full8_64x64
     }
   };
   (*VTBL[_log_xblk_sz][_log_yblk_sz])(_dst,_dystride,_src);
@@ -1186,13 +1628,13 @@ void od_mc_blend_full_split8_check(unsigned char *_dst,int _dystride,
 #define OD_IM_LOAD16A \
   "#OD_IM_LOAD16A\n\t" \
   "mov (%[src]),%[a]\n\t" \
-  "movdqa (%[a],%[row]),%%xmm0\n\t" \
+  "movdqa (%[a],%[row],4),%%xmm0\n\t" \
   "mov %c[pstride](%[src]),%[a]\n\t" \
-  "movdqa (%[a],%[row]),%%xmm1\n\t" \
+  "movdqa (%[a],%[row],4),%%xmm1\n\t" \
   "mov %c[pstride]*4(%[src]),%[a]\n\t" \
-  "movdqa (%[a],%[row]),%%xmm2\n\t" \
+  "movdqa (%[a],%[row],4),%%xmm2\n\t" \
   "mov %c[pstride]*5(%[src]),%[a]\n\t" \
-  "movdqa (%[a],%[row]),%%xmm3\n\t" \
+  "movdqa (%[a],%[row],4),%%xmm3\n\t" \
 
 /*Loads a block of 16 bytes from the third image into xmm2 and xmm1.
   xmm1 contains a duplicate copy of xmm2, or not, depending on whether the
@@ -1200,9 +1642,9 @@ void od_mc_blend_full_split8_check(unsigned char *_dst,int _dystride,
 #define OD_IM_LOAD16B \
   "#OD_IM_LOAD16B\n\t" \
   "mov %c[pstride]*3(%[src]),%[a]\n\t" \
-  "movdqa (%[a],%[row]),%%xmm2\n\t" \
+  "movdqa (%[a],%[row],4),%%xmm2\n\t" \
   "mov %c[pstride]*7(%[src]),%[a]\n\t" \
-  "movdqa (%[a],%[row]),%%xmm1\n\t" \
+  "movdqa (%[a],%[row],4),%%xmm1\n\t" \
 
 /*Loads a block of 16 bytes from the fourth image into xmm3 and xmm1.
   xmm1 contains a duplicate copy of xmm3, or not, depending on whether the
@@ -1210,9 +1652,9 @@ void od_mc_blend_full_split8_check(unsigned char *_dst,int _dystride,
 #define OD_IM_LOAD16C \
   "#OD_IM_LOAD16C\n\t" \
   "mov %c[pstride]*2(%[src]),%[a]\n\t" \
-  "movdqa (%[a],%[row]),%%xmm3\n\t" \
+  "movdqa (%[a],%[row],4),%%xmm3\n\t" \
   "mov %c[pstride]*6(%[src]),%[a]\n\t" \
-  "movdqa (%[a],%[row]),%%xmm1\n\t" \
+  "movdqa (%[a],%[row],4),%%xmm1\n\t" \
 
 /*Blends 4 rows of a 4xN block with split edges (N up to 32).
   %[dst] must be manually advanced to the proper row beforehand because of its
@@ -1270,7 +1712,7 @@ void od_mc_blend_full_split8_check(unsigned char *_dst,int _dystride,
   "psllw $" #_log_yblk_sz "+2,%%xmm7\n\t" \
   "lea %[OD_BIL4V],%[a]\n\t" \
   OD_IM_BLEND("%%xmm0","%%xmm4","%%xmm2","%%xmm5","$" #_log_yblk_sz, \
-   "(%[a],%[row])","0x10(%[a],%[row])") \
+   "(%[a],%[row],4)","0x10(%[a],%[row],4)") \
   OD_IM_PACK("%%xmm0","%%xmm4","%%xmm7","$" #_log_yblk_sz "+3") \
   /*Get it back out to memory. \
     We have to do this 4 bytes at a time because the destination will not in \
@@ -1339,7 +1781,7 @@ void od_mc_blend_full_split8_check(unsigned char *_dst,int _dystride,
   "psllw $" #_log_yblk_sz "+3,%%xmm7\n\t" \
   "lea %[OD_BILV],%[a]\n\t" \
   OD_IM_BLEND("%%xmm0","%%xmm4","%%xmm2","%%xmm5","$" #_log_yblk_sz, \
-   "(%[a],%[row],2)","0x10(%[a],%[row],2)") \
+   "(%[a],%[row],8)","0x10(%[a],%[row],8)") \
   OD_IM_PACK("%%xmm0","%%xmm4","%%xmm7","$" #_log_yblk_sz "+4") \
   /*Get it back out to memory. \
     We have to do this 8 bytes at a time because the destination will not in \
@@ -1347,6 +1789,117 @@ void od_mc_blend_full_split8_check(unsigned char *_dst,int _dystride,
   "movq %%xmm0,(%[dst])\n\t" \
   "psrldq $8,%%xmm0\n\t" \
   "movq %%xmm0,(%[dst],%[dystride])\n\t" \
+
+/*Blends 1 row of an 16xN block with split edges (N up to 16).
+  %[dst] must be manually advanced to the proper row beforehand because of its
+   stride.*/
+#define OD_MC_BLEND_FULL_SPLIT8_16x1(_log_yblk_sz) \
+  "pxor %%xmm7,%%xmm7\n\t" \
+  /*Load the first two images to blend.*/ \
+  OD_IM_LOAD16A \
+  /*Unpack and merge the 0 image.*/ \
+  OD_IM_UNPACK("%%xmm0","%%xmm4","%%xmm7") \
+  OD_IM_UNPACK("%%xmm2","%%xmm6","%%xmm7") \
+  "paddw %%xmm2,%%xmm0\n\t" \
+  "paddw %%xmm6,%%xmm4\n\t" \
+  /*Unpack and merge the 1 image.*/ \
+  OD_IM_UNPACK("%%xmm1","%%xmm5","%%xmm7") \
+  OD_IM_UNPACK("%%xmm3","%%xmm6","%%xmm7") \
+  "lea %[OD_BILH],%[a]\n\t" \
+  "paddw %%xmm3,%%xmm1\n\t" \
+  "paddw %%xmm6,%%xmm5\n\t" \
+  "movdqa 0x10(%[a]),%%xmm6\n\t" \
+  /*Blend the 0 and 1 images.*/ \
+  OD_IM_BLEND("%%xmm0","%%xmm4","%%xmm1","%%xmm5","$4","(%[a])","%%xmm6") \
+  /*Load, unpack, and merge the 2 image.*/ \
+  OD_IM_LOAD16B \
+  OD_IM_UNPACK("%%xmm2","%%xmm5","%%xmm7") \
+  OD_IM_UNPACK("%%xmm1","%%xmm6","%%xmm7") \
+  "paddw %%xmm1,%%xmm2\n\t" \
+  "paddw %%xmm6,%%xmm5\n\t" \
+  /*Load, unpack, and merge the 3 image.*/ \
+  OD_IM_LOAD16C \
+  OD_IM_UNPACK("%%xmm3","%%xmm6","%%xmm7") \
+  /*"lea %[OD_BILV],%[a]\n\t" \
+  OD_IM_UNPACK("%%xmm1","%%xmm7","(%[a])") \
+  "paddw %%xmm1,%%xmm3\n\t" \
+  "pcmpeqw %%xmm1,%%xmm1\n\t" \
+  "paddw %%xmm7,%%xmm6\n\t" \
+  "pxor %%xmm7,%%xmm7\n\t"*/ \
+  /*Alternate version: Saves 1 memory reference, but has a longer dependency \
+     chain.*/ \
+  "movdqa %%xmm1,%%xmm7\n\t" \
+  "punpcklbw %[OD_BILV],%%xmm7\n\t" \
+  "paddw %%xmm7,%%xmm3\n\t" \
+  "pxor %%xmm7,%%xmm7\n\t" \
+  "punpckhbw %%xmm7,%%xmm1\n\t" \
+  "paddw %%xmm1,%%xmm6\n\t" \
+  /*End alternate version.*/ \
+  "lea %[OD_BILH],%[a]\n\t" \
+  "movdqa 0x10(%[a]),%%xmm1\n\t" \
+  OD_IM_BLEND("%%xmm2","%%xmm5","%%xmm3","%%xmm6","$4","(%[a])","%%xmm1") \
+  /*Blend, shift, and re-pack images 0+1 and 2+3.*/ \
+  "lea %[OD_BILV],%[a]\n\t" \
+  "movdqa (%[a],%[row],4),%%xmm6\n\t" \
+  OD_IM_BLEND_AND_PACK("%%xmm0","%%xmm4","%%xmm2","%%xmm5", "%%xmm6", \
+   "4","9","1") \
+  /*Get it back out to memory.*/ \
+  "movdqa %%xmm0,(%[dst])\n\t" \
+
+/*Blends half of a row of a 32xN block with split edges (N up to 32).
+  %[dst] must be manually advanced to the proper row beforehand because of its
+   stride.
+  _bilh_offset: Offset in the BILH table where to read the weights from.
+  _bilv_offset: Offset in the BILV table where to read the weights from.
+  _dst_offset: Offset in the dst pointer where to write the blended row.*/
+#define OD_MC_BLEND_FULL_SPLIT8_32_HALF(_bilh_offset, _bilv_offset, \
+ _dst_offset) \
+  "pxor %%xmm7,%%xmm7\n\t" \
+  /*Load the first two images to blend.*/ \
+  OD_IM_LOAD16A \
+  /*Unpack and merge the 0 image.*/ \
+  OD_IM_UNPACK("%%xmm0","%%xmm4","%%xmm7") \
+  OD_IM_UNPACK("%%xmm2","%%xmm6","%%xmm7") \
+  "paddw %%xmm2,%%xmm0\n\t" \
+  "paddw %%xmm6,%%xmm4\n\t" \
+  /*Unpack and merge the 1 image.*/ \
+  OD_IM_UNPACK("%%xmm1","%%xmm5","%%xmm7") \
+  OD_IM_UNPACK("%%xmm3","%%xmm6","%%xmm7") \
+  "lea %[OD_BILH],%[a]\n\t" \
+  "paddw %%xmm3,%%xmm1\n\t" \
+  "paddw %%xmm6,%%xmm5\n\t" \
+  "movdqa " _bilh_offset "+0x10(%[a]),%%xmm6\n\t" \
+  /*Blend the 0 and 1 images.*/ \
+  OD_IM_BLEND("%%xmm0","%%xmm4","%%xmm1","%%xmm5","$5", \
+   _bilh_offset "(%[a])","%%xmm6") \
+  /*Load, unpack, and merge the 2 image.*/ \
+  OD_IM_LOAD16B \
+  OD_IM_UNPACK("%%xmm2","%%xmm5","%%xmm7") \
+  OD_IM_UNPACK("%%xmm1","%%xmm6","%%xmm7") \
+  "paddw %%xmm1,%%xmm2\n\t" \
+  "paddw %%xmm6,%%xmm5\n\t" \
+  /*Load, unpack, and merge the 3 image.*/ \
+  OD_IM_LOAD16C \
+  OD_IM_UNPACK("%%xmm3","%%xmm6","%%xmm7") \
+  "movdqa %%xmm1,%%xmm7\n\t" \
+  "punpcklbw %[OD_BILV],%%xmm7\n\t" \
+  "paddw %%xmm7,%%xmm3\n\t" \
+  "pxor %%xmm7,%%xmm7\n\t" \
+  "punpckhbw %%xmm7,%%xmm1\n\t" \
+  "paddw %%xmm1,%%xmm6\n\t" \
+  "lea %[OD_BILH],%[a]\n\t" \
+  "movdqa " _bilh_offset "+0x10(%[a]),%%xmm1\n\t" \
+  OD_IM_BLEND("%%xmm2","%%xmm5","%%xmm3","%%xmm6","$5", \
+   _bilh_offset "(%[a])","%%xmm1") \
+  /*Blend, shift, and re-pack images 0+1 and 2+3.*/ \
+  "lea %[OD_BILV],%[a]\n\t" \
+  "movdqa " _bilv_offset "(%[a],%[row],2),%%xmm6\n\t" \
+  /*(b - a) << w requires 8 + 1 + 5 + 1 + 1 == 16 bits (signed). \
+    scale << (16 - x - w) requires 5 + (16 - 5 - 1) == 15 bits (unsigned).*/ \
+  OD_IM_BLEND_AND_PACK("%%xmm0","%%xmm4","%%xmm2","%%xmm5", "%%xmm6", \
+   "5","11","1") \
+  /*Get it back out to memory.*/ \
+  "movdqa %%xmm0," _dst_offset "(%[dst])\n\t" \
 
 #if 0
 /*Defines a pure-C implementation with hard-coded loop limits for block sizes
@@ -1454,7 +2007,7 @@ static void od_mc_blend_full_split8_4x8(unsigned char *_dst,int _dystride,
  const unsigned char *_src[8]){
   ptrdiff_t a;
   ptrdiff_t row;
-  for(row=0;row<0x20;row+=0x10){
+  for(row=0;row<8;row+=4){
     __asm__ __volatile__(
       OD_MC_BLEND_FULL_SPLIT8_4x4(3)
       "lea (%[dst],%[dystride],2),%[dst]\t\n"
@@ -1484,7 +2037,7 @@ static void od_mc_blend_full_split8_8x4(unsigned char *_dst,int _dystride,
  const unsigned char *_src[8]){
   ptrdiff_t a;
   ptrdiff_t row;
-  for(row=0;row<0x20;row+=0x10){
+  for(row=0;row<8;row+=4){
     __asm__ __volatile__(
       OD_MC_BLEND_FULL_SPLIT8_8x2(2)
       "lea (%[dst],%[dystride],2),%[dst]\t\n"
@@ -1500,7 +2053,7 @@ static void od_mc_blend_full_split8_8x8(unsigned char *_dst,int _dystride,
  const unsigned char *_src[8]){
   ptrdiff_t a;
   ptrdiff_t row;
-  for(row=0;row<0x40;row+=0x10){
+  for(row=0;row<8*8/4;row+=4){
     __asm__ __volatile__(
       OD_MC_BLEND_FULL_SPLIT8_8x2(3)
       "lea (%[dst],%[dystride],2),%[dst]\t\n"
@@ -1512,7 +2065,41 @@ static void od_mc_blend_full_split8_8x8(unsigned char *_dst,int _dystride,
   }
 }
 
-OD_MC_BLEND_FULL_SPLIT8_C(16,16,4,4)
+static void od_mc_blend_full_split8_16x16(unsigned char *_dst,int _dystride,
+ const unsigned char *_src[8]){
+  ptrdiff_t a;
+  ptrdiff_t row;
+  for(row=0;row<16*16/4;row+=4){
+    __asm__ __volatile__(
+      OD_MC_BLEND_FULL_SPLIT8_16x1(4)
+      "lea (%[dst],%[dystride]),%[dst]\t\n"
+      :[dst]"+r"(_dst),[row]"+r"(row),[a]"=&r"(a)
+      :[src]"r"(_src),[dystride]"r"((ptrdiff_t)_dystride),
+       [OD_BILH]"m"(*OD_BILH),[OD_BILV]"m"(*OD_BILV),
+       [pstride]"i"(sizeof(*_src))
+    );
+  }
+}
+
+static void od_mc_blend_full_split8_32x32(unsigned char *_dst,int _dystride,
+ const unsigned char *_src[8]){
+  ptrdiff_t a;
+  ptrdiff_t row;
+  for(row=0;row<32*32/4;row+=4){
+    __asm__ __volatile__(
+      /*First 16 bytes.*/ \
+      OD_MC_BLEND_FULL_SPLIT8_32_HALF("0x00","0","0x00") \
+      /*Second 16 bytes.*/ \
+      "lea 4(%[row]),%[row]\t\n" \
+      OD_MC_BLEND_FULL_SPLIT8_32_HALF("0x20","-8","0x10") \
+      "lea (%[dst],%[dystride]),%[dst]\t\n"
+      :[dst]"+r"(_dst),[row]"+r"(row),[a]"=&r"(a)
+      :[src]"r"(_src),[dystride]"r"((ptrdiff_t)_dystride),
+       [OD_BILH]"m"(*OD_BILH),[OD_BILV]"m"(*OD_BILV),
+       [pstride]"i"(sizeof(*_src))
+    );
+  }
+}
 
 typedef void (*od_mc_blend_full_split8_fixed_func)(unsigned char *_dst,
  int _dystride,const unsigned char *_src[8]);
@@ -1561,6 +2148,9 @@ void od_mc_blend_full_split8_sse2(unsigned char *_dst,int _dystride,
        above.*/
     {
       NULL, NULL, NULL, NULL, od_mc_blend_full_split8_16x16
+    },
+    {
+      NULL, NULL, NULL, NULL, NULL, od_mc_blend_full_split8_32x32
     }
   };
   /*We pack all the image pointers in one array to save a register.*/

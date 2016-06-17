@@ -1,5 +1,5 @@
 /*Daala video codec
-Copyright (c) 2012 Daala project contributors.  All rights reserved.
+Copyright (c) 2013 Daala project contributors.  All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -22,33 +22,14 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 
-#if !defined(_pvq_code_H)
-# define _pvq_code_H
+#if !defined(_util_H)
+# define _util_H (1)
 
-# include "encint.h"
-# include "entenc.h"
-# include "entdec.h"
-# include "filter.h"
-# include "generic_code.h"
-# include "laplace_code.h"
-# include "partition.h"
+typedef void (*od_copy_nxn_func)(unsigned char *_dst, int _dstride,
+ const unsigned char *_src, int _sstride);
 
-# define PRED4_PROB (26376)
-extern const uint16_t pred8_cdf[16];
-extern const uint16_t pred16_cdf[16][8];
-
-#if OD_SIGNAL_Q_SCALING
-void od_encode_quantizer_scaling(daala_enc_ctx *enc, int q_scaling, int bx,
- int by, int skip);
-#endif
-
-int od_pvq_encode(daala_enc_ctx *enc, od_coeff *predt, od_coeff *cblock,
-                   od_coeff *scalar_out, int scale, int pli, int bs,
-                   const double *beta, int robust, int is_keyframe,
-                   int q_scaling, int bx, int by);
-
-void od_pvq_decode(daala_dec_ctx *dec, od_coeff *ref, od_coeff *out, int scale,
-                   int pli, int bs, const double *beta, int robust,
-                   int is_keyframe, unsigned int *flags, int block_skip);
-
+extern const od_copy_nxn_func OD_COPY_NXN_8_C[OD_LOG_COPYBSIZE_MAX + 1];
+extern const od_copy_nxn_func OD_COPY_NXN_16_C[OD_LOG_COPYBSIZE_MAX + 1];
+void od_copy_nxm(unsigned char *_dst, int _dstride,
+ const unsigned char *_src, int _sstride, int _log_n, int _log_m);
 #endif

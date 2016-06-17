@@ -26,15 +26,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 # include "config.h"
 #endif
 
+#include "odintrin.h"
 #include "pvq.h"
+#include "partition.h"
 #include <stdlib.h>
 #include <stdio.h>
-#include "logging.h"
 #include <math.h>
 #include <string.h>
 #include "filter.h"
-
-#define EPSILON 1e-30
 
 /*These tables were generated using compute_basis.c. If OD_FILT_SIZE is
    changed, they have to be regenerated.*/
@@ -255,37 +254,117 @@ const double *const OD_PVQ_BETA[2][OD_NPLANES_MAX][OD_NBSIZES + 1] = {
    OD_PVQ_BETA64_CHROMA}}
 };
 
-/* Apply the quantization matrix and the magnitude compensation. We need to
-   compensate for the magnitude because lapping causes some basis functions to
-   be smaller, so they would end up being quantized too finely (the same
-   error in the quantized domain would result in a smaller pixel domain
-   error). */
-void od_apply_qm(od_coeff *out, int out_stride, od_coeff *in, int in_stride,
- int bs, int dec, int inverse, const int *qm) {
+void od_adapt_pvq_ctx_reset(od_pvq_adapt_ctx *state, int is_keyframe) {
+  od_pvq_codeword_ctx *ctx;
   int i;
-  int j;
-  for (i = 0; i < 4 << bs; i++) {
-    for (j = 0; j < 4 << bs; j++) {
-      double mag;
-#if OD_DEBLOCKING || OD_DISABLE_FILTER
-      mag = 1;
-#else
-      mag = OD_BASIS_MAG[dec][bs][i]*OD_BASIS_MAG[dec][bs][j];
-#endif
-      if (i == 0 && j == 0) {
-        mag = 1;
-      }
-      else {
-        mag /= 0.0625*qm[(i << 1 >> bs)*8 + (j << 1 >> bs)];
-      }
-      if (inverse) {
-        out[i*out_stride + j] = (od_coeff)floor(.5 + in[i*in_stride + j]/mag);
-      }
-      else {
-        out[i*out_stride + j] = (od_coeff)floor(.5 + in[i*in_stride + j]*mag);
-      }
+  int pli;
+  int bs;
+  ctx = &state->pvq_codeword_ctx;
+  generic_model_init(&state->pvq_param_model[0]);
+  generic_model_init(&state->pvq_param_model[1]);
+  generic_model_init(&state->pvq_param_model[2]);
+  for (i = 0; i < 2*OD_NBSIZES; i++) {
+    ctx->pvq_adapt[4*i + OD_ADAPT_K_Q8] = 384;
+    ctx->pvq_adapt[4*i + OD_ADAPT_SUM_EX_Q8] = 256;
+    ctx->pvq_adapt[4*i + OD_ADAPT_COUNT_Q8] = 104;
+    ctx->pvq_adapt[4*i + OD_ADAPT_COUNT_EX_Q8] = 128;
+  }
+  ctx->pvq_k1_increment = 128;
+  OD_CDFS_INIT(ctx->pvq_k1_cdf, ctx->pvq_k1_increment);
+  for (pli = 0; pli < OD_NPLANES_MAX; pli++) {
+    for (bs = 0; bs < OD_NBSIZES; bs++)
+    for (i = 0; i < PVQ_MAX_PARTITIONS; i++) {
+      state->pvq_exg[pli][bs][i] = 2 << 16;
     }
   }
+  for (i = 0; i < OD_NBSIZES*PVQ_MAX_PARTITIONS; i++) {
+    state->pvq_ext[i] = is_keyframe ? 24576 : 2 << 16;
+  }
+  state->pvq_gaintheta_increment = 128;
+  OD_CDFS_INIT(state->pvq_gaintheta_cdf, state->pvq_gaintheta_increment >> 2);
+  state->pvq_skip_dir_increment = 128;
+  OD_CDFS_INIT(state->pvq_skip_dir_cdf, state->pvq_skip_dir_increment >> 2);
+  ctx->pvq_split_increment = 128;
+  OD_CDFS_INIT(ctx->pvq_split_cdf, ctx->pvq_split_increment >> 1);
+}
+
+/* QMs are arranged from smallest to largest blocksizes, first for
+   blocks with decimation=0, followed by blocks with decimation=1.*/
+int od_qm_offset(int bs, int xydec)
+{
+    return xydec*OD_QM_STRIDE + OD_QM_OFFSET(bs);
+}
+
+/* Initialize the quantization matrix with the magnitude compensation applied.
+   We need to compensate for the magnitude because lapping causes some basis
+   functions to be smaller, so they would end up being quantized too finely
+   (the same error in the quantized domain would result in a smaller pixel
+   domain error). */
+void od_init_qm(int16_t *x, int16_t *x_inv, const int *qm) {
+  int i;
+  int j;
+  int16_t y[OD_BSIZE_MAX*OD_BSIZE_MAX];
+  int16_t y_inv[OD_BSIZE_MAX*OD_BSIZE_MAX];
+  int16_t *x1;
+  int16_t *x1_inv;
+  int off;
+  int bs;
+  int xydec;
+  for (bs = 0; bs < OD_NBSIZES; bs++) {
+    for (xydec = 0; xydec < 2; xydec++) {
+      off = od_qm_offset(bs, xydec);
+      x1 = x + off;
+      x1_inv = x_inv + off;
+      for (i = 0; i < 4 << bs; i++) {
+        for (j = 0; j < 4 << bs; j++) {
+          double mag;
+#if OD_DEBLOCKING || OD_DISABLE_FILTER
+          mag = 1.0;
+#else
+          mag = OD_BASIS_MAG[xydec][bs][i]*OD_BASIS_MAG[xydec][bs][j];
+#endif
+          if (i == 0 && j == 0) {
+            mag = 1.0;
+          }
+          else {
+            mag /= 0.0625*qm[(i << 1 >> bs)*8 + (j << 1 >> bs)];
+            OD_ASSERT(mag > 0.0);
+          }
+          /*Convert to fit in 16 bits.*/
+          y[i*(4 << bs) + j] = (int16_t)OD_MINI(OD_QM_SCALE_MAX,
+           (int32_t)floor(.5 + mag*OD_QM_SCALE));
+          y_inv[i*(4 << bs) + j] = (int16_t)floor(.5
+           + OD_QM_SCALE*OD_QM_INV_SCALE/(double)y[i*(4 << bs) + j]);
+        }
+      }
+      od_raster_to_coding_order_16(x1, 4 << bs, y, 4 << bs);
+      od_raster_to_coding_order_16(x1_inv, 4 << bs, y_inv, 4 << bs);
+    }
+  }
+}
+
+/* Maps each possible size (n) in the split k-tokenizer to a different value.
+   Possible values of n are:
+   2, 3, 4, 7, 8, 14, 15, 16, 31, 32, 63, 64, 127, 128
+   Since we don't care about the order (even in the bit-stream) the simplest
+   ordering (implemented here) is:
+   14, 2, 3, 4, 7, 8, 15, 16, 31, 32, 63, 64, 127, 128 */
+int od_pvq_size_ctx(int n) {
+  int logn;
+  int odd;
+  logn = OD_ILOG(n - 1);
+  odd = n & 1;
+  return 2*logn - 1 - odd - 7*(n == 14);
+}
+
+/* Maps a length n to a context for the (k=1, n<=16) coder, with a special
+   case when n is the original length (orig_length=1) of the vector (i.e. we
+   haven't split it yet). For orig_length=0, we use the same mapping as
+   od_pvq_size_ctx() up to n=16. When orig_length=1, we map lengths
+   7, 8, 14, 15 to contexts 8 to 11. */
+int od_pvq_k1_ctx(int n, int orig_length) {
+  if (orig_length) return 8 + 2*(n > 8) + (n & 1);
+  else return od_pvq_size_ctx(n);
 }
 
 /* Indexing for the packed quantization matrices. */
@@ -295,6 +374,78 @@ int od_qm_get_index(int bs, int band) {
   OD_ASSERT(bs >= 0 && bs < OD_NBSIZES);
   return bs*(bs + 1) + band - band/3;
 }
+
+#if !defined(OD_FLOAT_PVQ)
+/*See celt/mathops.c in Opus and tools/cos_search.c.*/
+static int16_t od_pvq_cos_pi_2(int16_t x)
+{
+  int16_t x2;
+  x2 = OD_MULT16_16_Q15(x, x);
+  return OD_MINI(32767, (1073758164 - x*x + x2*(-7654 + OD_MULT16_16_Q16(x2,
+   16573 + OD_MULT16_16_Q16(-2529, x2)))) >> 15);
+}
+#endif
+
+/*Approximates cos(x) for -pi < x < pi.
+  Input is in OD_THETA_SCALE.*/
+od_val16 od_pvq_cos(od_val32 x) {
+#if defined(OD_FLOAT_PVQ)
+  return cos(x);
+#else
+  /*Wrap x around by masking, since cos is periodic.*/
+  x = x & 0x0001ffff;
+  if (x > (1 << 16)) {
+    x = (1 << 17) - x;
+  }
+  if (x & 0x00007fff) {
+    if (x < (1 << 15)) {
+       return od_pvq_cos_pi_2((int16_t)x);
+    }
+    else {
+      return -od_pvq_cos_pi_2((int16_t)(65536 - x));
+    }
+  }
+  else {
+    if (x & 0x0000ffff) {
+      return 0;
+    }
+    else if (x & 0x0001ffff) {
+      return -32767;
+    }
+    else {
+      return 32767;
+    }
+  }
+#endif
+}
+
+/*Approximates sin(x) for 0 <= x < pi.
+  Input is in OD_THETA_SCALE.*/
+od_val16 od_pvq_sin(od_val32 x) {
+#if defined(OD_FLOAT_PVQ)
+  return sin(x);
+#else
+  return od_pvq_cos(32768 - x);
+#endif
+}
+
+#if !defined(OD_FLOAT_PVQ)
+/* Computes an upper-bound on the number of bits required to store the L2 norm
+   of a vector (excluding sign). */
+int od_vector_log_mag(const od_coeff *x, int n) {
+  int i;
+  int32_t sum;
+  sum = 0;
+  for (i = 0; i < n; i++) {
+    int16_t tmp;
+    tmp = x[i] >> 8;
+    sum += tmp*(int32_t)tmp;
+  }
+  /* We add one full bit (instead of rounding OD_ILOG() up) for safety because
+     the >> 8 above causes the sum to be slightly underestimated. */
+  return 8 + 1 + OD_ILOG(n + sum)/2;
+}
+#endif
 
 /** Computes Householder reflection that aligns the reference r to the
  *  dimension in r with the greatest absolute value. The reflection
@@ -307,26 +458,26 @@ int od_qm_get_index(int bs, int band) {
  * @param [out]     sign   sign of reflection
  * @return                 dimension number to which reflection aligns
  **/
-int od_compute_householder(double *r, int n, double gr, int *sign) {
+int od_compute_householder(od_val16 *r, int n, od_val32 gr, int *sign,
+ int shift) {
   int m;
   int i;
   int s;
-  double maxr;
+  od_val16 maxr;
   /* Pick component with largest magnitude. Not strictly
    * necessary, but it helps numerical stability */
   m = 0;
   maxr = 0;
   for (i = 0; i < n; i++) {
-    if (fabs(r[i]) > maxr) {
-      maxr = fabs(r[i]);
+    if (OD_ABS(r[i]) > maxr) {
+      maxr = OD_ABS(r[i]);
       m = i;
     }
   }
-  OD_LOG((OD_LOG_PVQ, OD_LOG_DEBUG, "max r: %f %f %d", maxr, r[m], m));
   s = r[m] > 0 ? 1 : -1;
   /* This turns r into a Householder reflection vector that would reflect
    * the original r[] to e_m */
-  r[m] += gr*s;
+  r[m] += OD_SHR_ROUND(gr*s, shift);
   *sign = s;
   return m;
 }
@@ -334,27 +485,29 @@ int od_compute_householder(double *r, int n, double gr, int *sign) {
 /** Applies Householder reflection from compute_householder(). The
  * reflection is its own inverse.
  *
- * @param [in,out]  x      vector to be reflected
+ * @param [out]     out    reflected vector
+ * @param [in]      x      vector to be reflected
  * @param [in]      r      reflection
  * @param [in]      n      number of dimensions in x,r
  */
-void od_apply_householder(double *x, const double *r, int n) {
+void od_apply_householder(od_val16 *out, const od_val16 *x, const od_val16 *r,
+ int n) {
   int i;
-  double proj;
+  od_val32 proj;
   double proj_1;
-  double l2r;
+  od_val32 l2r;
   l2r = 0;
   for (i = 0; i < n; i++) {
-    l2r += r[i]*r[i];
+    l2r += OD_MULT16_16(r[i], r[i]);
   }
   /* Apply Householder reflection */
   proj = 0;
   for (i = 0; i < n; i++) {
-    proj += r[i]*x[i];
+    proj += OD_MULT16_16(r[i], x[i]);
   }
   proj_1 = proj*2./(1e-100 + l2r);
   for (i = 0; i < n; i++) {
-    x[i] -= r[i]*proj_1;
+    out[i] = OD_ROUND16(x[i] - r[i]*proj_1);
   }
 }
 
@@ -365,10 +518,48 @@ void od_apply_householder(double *x, const double *r, int n) {
  * @param [in]  beta  activity masking beta param (exponent)
  * @return            g^(1/beta)
  */
-static double od_gain_compand(double g, int q0, double beta) {
-  if (beta == 1) return g/q0;
-  else return OD_COMPAND_SCALE*pow(g*OD_COMPAND_SCALE_1, 1./beta)/q0;
+static od_val32 od_gain_compand(od_val32 g, int q0, double beta) {
+  if (beta == 1) return OD_ROUND32(OD_CGAIN_SCALE*g/(double)q0);
+  else {
+    return OD_ROUND32(OD_CGAIN_SCALE*OD_COMPAND_SCALE*pow(g*OD_COMPAND_SCALE_1,
+     1./beta)/(double)q0);
+  }
 }
+
+#if !defined(OD_FLOAT_PVQ)
+#define OD_SQRT_INSHIFT 16
+#define OD_SQRT_OUTSHIFT 15
+static int16_t od_rsqrt_norm(int16_t x);
+
+static int16_t od_sqrt_norm(int32_t x)
+{
+  OD_ASSERT(x < 65536);
+  return OD_MINI(OD_SHR_ROUND(x*od_rsqrt_norm(x), OD_SQRT_OUTSHIFT), 32767);
+}
+
+static int32_t od_sqrt(int32_t x, int *sqrt_shift)
+{
+  int k;
+  int s;
+  int32_t t;
+  if (x == 0) {
+    *sqrt_shift = 0;
+     return 0;
+  }
+  OD_ASSERT(x < (1 << 30));
+  k = ((OD_ILOG(x) - 1) >> 1);
+  /*t is x in the range [0.25, 1) in QINSHIFT, or x*2^(-s).
+    Shift by log2(x) - log2(0.25*(1 << INSHIFT)) to ensure 0.25 lower bound.*/
+  s = 2*k - (OD_SQRT_INSHIFT - 2);
+  t = OD_VSHR(x, s);
+  /*We want to express od_sqrt() in terms of od_sqrt_norm(), which is
+     defined as (2^OUTSHIFT)*sqrt(t*(2^-INSHIFT)) with t=x*(2^-s).
+    This simplifies to 2^(OUTSHIFT-(INSHIFT/2)-(s/2))*sqrt(x), so the caller
+     needs to shift right by OUTSHIFT - INSHIFT/2 - s/2.*/
+  *sqrt_shift = OD_SQRT_OUTSHIFT - ((s + OD_SQRT_INSHIFT) >> 1);
+  return od_sqrt_norm(t);
+}
+#endif
 
 /** Gain expanding: raises gain to the power beta for activity masking.
  *
@@ -377,14 +568,40 @@ static double od_gain_compand(double g, int q0, double beta) {
  * @param [in]  beta  activity masking beta param (exponent)
  * @return            g^beta
  */
-double od_gain_expand(double cg, int q0, double beta) {
-  if (beta == 1) return cg*q0;
+od_val32 od_gain_expand(od_val32 cg0, int q0, double beta) {
+  if (beta == 1) {
+    /*The multiply fits into 28 bits because the expanded gain has a range from
+       0 to 2^20.*/
+    return OD_SHR_ROUND(cg0*q0, OD_CGAIN_SHIFT);
+  }
   else if (beta == 1.5) {
+#if defined(OD_FLOAT_PVQ)
+    double cg;
+    cg = cg0*OD_CGAIN_SCALE_1;
     cg *= q0*OD_COMPAND_SCALE_1;
-    return OD_COMPAND_SCALE*cg*sqrt(cg);
+    return OD_ROUND32(OD_COMPAND_SCALE*cg*sqrt(cg));
+#else
+    int32_t irt;
+    int64_t tmp;
+    int sqrt_inshift;
+    int sqrt_outshift;
+    /*cg0 is in Q(OD_CGAIN_SHIFT) and we need to divide it by
+       2^OD_COMPAND_SHIFT.*/
+    irt = od_sqrt(cg0*q0, &sqrt_outshift);
+    sqrt_inshift = (OD_CGAIN_SHIFT + OD_COMPAND_SHIFT) >> 1;
+    /*tmp is in Q(OD_CGAIN_SHIFT + OD_COMPAND_SHIFT).*/
+    tmp = cg0*q0*(int64_t)irt;
+    /*Expanded gain must be in Q(OD_COMPAND_SHIFT), thus OD_COMPAND_SHIFT is
+       not included here.*/
+    return OD_VSHR_ROUND(tmp, OD_CGAIN_SHIFT + sqrt_outshift + sqrt_inshift);
+#endif
   }
   else {
-    return OD_COMPAND_SCALE*pow(cg*q0*OD_COMPAND_SCALE_1, beta);
+    /*Expanded gain must be in Q(OD_COMPAND_SHIFT), hence the multiply by
+       OD_COMPAND_SCALE.*/
+    double cg;
+    cg = cg0*OD_CGAIN_SCALE_1;
+    return OD_ROUND32(OD_COMPAND_SCALE*pow(cg*q0*OD_COMPAND_SCALE_1, beta));
   }
 }
 
@@ -396,13 +613,18 @@ double od_gain_expand(double cg, int q0, double beta) {
  * @param [in]      q0     quantizer
  * @param [out]     g      raw gain
  * @param [in]      beta   activity masking beta param
+ * @param [in]      bshift shift to be applied to raw gain
  * @return                 quantized/companded gain
  */
-double od_pvq_compute_gain(od_coeff *x, int n, int q0, double *g, double beta){
+od_val32 od_pvq_compute_gain(const od_val16 *x, int n, int q0, od_val32 *g,
+ double beta, int bshift) {
   int i;
-  double acc=0;
-  for (i = 0; i < n; i++) acc += x[i]*(double)x[i];
-  *g = sqrt(acc);
+  od_val32 acc;
+  acc = 0;
+  for (i = 0; i < n; i++) {
+    acc += x[i]*(od_val32)x[i];
+  }
+  *g = OD_ROUND32(sqrt(acc)*OD_SHL(1, bshift));
   /* Normalize gain by quantization step size and apply companding
      (if ACTIVITY != 1). */
   return od_gain_compand(*g, q0, beta);
@@ -414,11 +636,11 @@ double od_pvq_compute_gain(od_coeff *x, int n, int q0, double *g, double beta){
  * @param [in]      beta   activity masking beta param
  * @return                 max theta value
  */
-int od_pvq_compute_max_theta(double qcg, double beta){
+int od_pvq_compute_max_theta(od_val32 qcg, double beta){
   /* Set angular resolution (in ra) to match the encoded gain */
-  int ts = (int)floor(.5 + qcg*M_PI/(2*beta));
+  int ts = (int)floor(.5 + qcg*OD_CGAIN_SCALE_1*M_PI/(2*beta));
   /* Special case for low gains -- will need to be tuned anyway */
-  if (qcg < 1.4) ts = 1;
+  if (qcg < 1.4*OD_CGAIN_SCALE) ts = 1;
   return ts;
 }
 
@@ -428,9 +650,12 @@ int od_pvq_compute_max_theta(double qcg, double beta){
  * @param [in]      max_theta  maximum theta value
  * @return                     decoded theta value
  */
-double od_pvq_compute_theta(int t, int max_theta) {
-  if (max_theta != 0) return OD_MINI(t, max_theta - 1)*.5*M_PI/max_theta;
-  return 0;
+od_val32 od_pvq_compute_theta(int t, int max_theta) {
+  if (max_theta != 0) {
+    return OD_ROUND32(OD_THETA_SCALE*OD_MINI(t, max_theta - 1)*
+     .5*M_PI/max_theta);
+  }
+  else return 0;
 }
 
 /** Compute the number of pulses used for PVQ encoding a vector from
@@ -446,12 +671,15 @@ double od_pvq_compute_theta(int t, int max_theta) {
  * @param [in]      nodesync   do not use info that depend on the reference
  * @return                     number of pulses to use for coding
  */
-int od_pvq_compute_k(double qcg, int itheta, double theta, int noref, int n,
+int od_pvq_compute_k(od_val32 qcg, int itheta, od_val32 theta, int noref, int n,
  double beta, int nodesync) {
   if (noref) {
     if (qcg == 0) return 0;
-    if (n == 15 && qcg == 1 && beta > 1.25) return 1;
-    else return OD_MAXI(1, (int)floor(.5 + (qcg - .2)*sqrt((n+3)/2)/beta));
+    if (n == 15 && qcg == OD_CGAIN_SCALE && beta > 1.25) return 1;
+    else {
+      return OD_MAXI(1, (int)floor(.5 + (qcg*OD_CGAIN_SCALE_1 - .2)*
+       sqrt((n + 3)/2)/beta));
+    }
   }
   else {
     if (itheta == 0) return 0;
@@ -465,11 +693,67 @@ int od_pvq_compute_k(double qcg, int itheta, double theta, int noref, int n,
       return OD_MAXI(1, (int)floor(.5 + (itheta - .2)*sqrt((n + 2)/2)));
     }
     else {
-      return OD_MAXI(1, (int)floor(.5 + (qcg*sin(theta) - .2)*
-       sqrt((n + 2)/2)/beta));
+      return OD_MAXI(1, (int)floor(.5 + (qcg*OD_CGAIN_SCALE_1*
+       od_pvq_sin(theta)*OD_TRIG_SCALE_1 - .2)*sqrt((n + 2)/2)/beta));
     }
   }
 }
+
+#if !defined(OD_FLOAT_PVQ)
+#define OD_RSQRT_INSHIFT 16
+#define OD_RSQRT_OUTSHIFT 14
+/** Reciprocal sqrt approximation where the input is in the range [0.25,1) in
+     Q16 and the output is in the range (1.0, 2.0] in Q14).
+    Error is always within +/1 of round(1/sqrt(t))*/
+static int16_t od_rsqrt_norm(int16_t t)
+{
+  int16_t n;
+  int32_t r;
+  int32_t r2;
+  int32_t ry;
+  int32_t y;
+  int32_t ret;
+  /* Range of n is [-16384,32767] ([-0.5,1) in Q15).*/
+  n = t - 32768;
+  OD_ASSERT(n >= -16384);
+  /*Get a rough initial guess for the root.
+    The optimal minimax quadratic approximation (using relative error) is
+     r = 1.437799046117536+n*(-0.823394375837328+n*0.4096419668459485).
+    Coefficients here, and the final result r, are Q14.*/
+  r = (23565 + OD_MULT16_16_Q15(n, (-13481 + OD_MULT16_16_Q15(n, 6711))));
+  /*We want y = t*r*r-1 in Q15, but t is 32-bit Q16 and r is Q14.
+    We can compute the result from n and r using Q15 multiplies with some
+     adjustment, carefully done to avoid overflow.*/
+  r2 = r*r;
+  y = (((r2 >> 15)*n + r2) >> 12) - 131077;
+  ry = r*y;
+  /*Apply a 2nd-order Householder iteration: r += r*y*(y*0.375-0.5).
+    This yields the Q14 reciprocal square root of the Q16 t, with a maximum
+     relative error of 1.04956E-4, a (relative) RMSE of 2.80979E-5, and a peak
+     absolute error of 2.26591/16384.*/
+  ret = r + ((((ry >> 16)*(3*y) >> 3) - ry) >> 18);
+  OD_ASSERT(ret >= 16384 && ret < 32768);
+  return (int16_t)ret;
+}
+
+static int16_t od_rsqrt(int32_t x, int *rsqrt_shift)
+{
+   int k;
+   int s;
+   int16_t t;
+   k = (OD_ILOG(x) - 1) >> 1;
+  /*t is x in the range [0.25, 1) in QINSHIFT, or x*2^(-s).
+    Shift by log2(x) - log2(0.25*(1 << INSHIFT)) to ensure 0.25 lower bound.*/
+   s = 2*k - (OD_RSQRT_INSHIFT - 2);
+   t = OD_VSHR(x, s);
+   /*We want to express od_rsqrt() in terms of od_rsqrt_norm(), which is
+      defined as (2^OUTSHIFT)/sqrt(t*(2^-INSHIFT)) with t=x*(2^-s).
+     This simplifies to 2^(OUTSHIFT+(INSHIFT/2)+(s/2))/sqrt(x), so the caller
+      needs to shift right by OUTSHIFT + INSHIFT/2 + s/2.*/
+   *rsqrt_shift = OD_RSQRT_OUTSHIFT + ((s + OD_RSQRT_INSHIFT) >> 1);
+   return od_rsqrt_norm(t);
+}
+#endif
 
 /** Synthesizes one parition of coefficient values from a PVQ-encoded
  * vector.  This 'partial' version is called by the encode loop where
@@ -488,33 +772,81 @@ int od_pvq_compute_k(double qcg, int itheta, double theta, int noref, int n,
  * @param [in]      theta   decoded theta (prediction error)
  * @param [in]      m       alignment dimension of Householder reflection
  * @param [in]      s       sign of Householder reflection
+ * @param [in]      qm_inv  inverse of the QM with magnitude compensation
  */
 void od_pvq_synthesis_partial(od_coeff *xcoeff, const od_coeff *ypulse,
- const double *r, int n, int noref, double g, double theta, int m, int s) {
+ const od_val16 *r16, int n, int noref, od_val32 g, od_val32 theta, int m, int s,
+ const int16_t *qm_inv) {
   int i;
   int yy;
-  double scale;
+  od_val32 scale;
   int nn;
+  int gshift;
+  int qshift;
   OD_ASSERT(g != 0);
   nn = n-(!noref); /* when noref==0, vector in is sized n-1 */
   yy = 0;
   for (i = 0; i < nn; i++)
     yy += ypulse[i]*(int32_t)ypulse[i];
+  /* Shift required for the magnitude of the pre-qm synthesis to be guaranteed
+     to fit in 16 bits. In practice, the range will be 8192-16384 after scaling
+     most of the time. */
+  gshift = OD_MAXI(0, OD_ILOG(g) - 14);
+  /*scale is g/sqrt(yy) in Q(16-gshift) so that x[]*scale has a norm that fits
+     in 16 bits.*/
   if (yy == 0) scale = 0;
-  else scale = g/sqrt(yy);
+#if defined(OD_FLOAT_PVQ)
+  else {
+    scale = g/sqrt(yy);
+  }
+#else
+  else {
+    int rsqrt_shift;
+    int16_t rsqrt;
+    /*FIXME: should be < int64_t*/
+    int64_t tmp;
+    rsqrt = od_rsqrt(yy, &rsqrt_shift);
+    tmp = rsqrt*(int64_t)g;
+    scale = OD_VSHR_ROUND(tmp, rsqrt_shift + gshift - 16);
+  }
+  /* Shift to apply after multiplying by the inverse QM, taking into account
+     gshift. */
+  qshift = OD_QM_INV_SHIFT - gshift;
+#endif
   if (noref) {
-    for (i = 0; i < n; i++) xcoeff[i] = (od_coeff)floor(.5 + ypulse[i]*scale);
+    for (i = 0; i < n; i++) {
+      od_val32 x;
+      /* This multiply doesn't round, so it introduces some bias.
+         It would be nice (but not critical) to fix this. */
+      x = OD_MULT16_32_Q16(ypulse[i], scale);
+#if defined(OD_FLOAT_PVQ)
+      xcoeff[i] = (od_coeff)floor(.5
+       + x*(qm_inv[i]*OD_QM_INV_SCALE_1));
+#else
+      xcoeff[i] = OD_SHR_ROUND(x*qm_inv[i], qshift);
+#endif
+    }
   }
   else{
-    double x[MAXN];
-    scale *= sin(theta);
+    od_val16 x[MAXN];
+    scale = OD_ROUND32(scale*OD_TRIG_SCALE_1*od_pvq_sin(theta));
+    /* The following multiply doesn't round, but it's probably OK since
+       the Householder reflection is likely to undo most of the resulting
+       bias. */
     for (i = 0; i < m; i++)
-      x[i] = ypulse[i]*scale;
-    x[m] = -s*g*cos(theta);
+      x[i] = OD_MULT16_32_Q16(ypulse[i], scale);
+    x[m] = OD_ROUND16(-s*(OD_SHR_ROUND(g, gshift))*OD_TRIG_SCALE_1*
+     od_pvq_cos(theta));
     for (i = m; i < nn; i++)
-      x[i+1] = ypulse[i]*scale;
-    od_apply_householder(x, r, n);
-    for (i = 0; i < n; i++) xcoeff[i] = (od_coeff)floor(.5 + x[i]);
+      x[i+1] = OD_MULT16_32_Q16(ypulse[i], scale);
+    od_apply_householder(x, x, r16, n);
+    for (i = 0; i < n; i++) {
+#if defined(OD_FLOAT_PVQ)
+      xcoeff[i] = (od_coeff)floor(.5 + (x[i]*(qm_inv[i]*OD_QM_INV_SCALE_1)));
+#else
+      xcoeff[i] = OD_SHR_ROUND(x[i]*qm_inv[i], qshift);
+#endif
+    }
   }
 }
 

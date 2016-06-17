@@ -162,7 +162,7 @@ static int od_log_impl(od_log_facility fac, od_log_level level,
  unsigned int flags, const char *fmt, va_list ap) {
   if (!od_logging_active(fac, level))
     return 0;
-  (void)od_logger(fac, level, flags, fmt, ap);
+  OD_UNUSED(od_logger(fac, level, flags, fmt, ap));
 
   return 0;
 }
@@ -195,7 +195,7 @@ static int od_log_fprintf_stderr(od_log_facility facility,
   char fmt_buffer[1024];
   int rv;
   if (flags & OD_LOG_FLAG_PARTIAL) {
-    (void)vfprintf(stderr, fmt, ap);
+    OD_UNUSED(vfprintf(stderr, fmt, ap));
     return 0;
   }
   rv = snprintf(fmt_buffer, sizeof(fmt_buffer),
@@ -205,7 +205,7 @@ static int od_log_fprintf_stderr(od_log_facility facility,
     fprintf(stderr, "Error logging. Format string too long\n");
     return OD_EINVAL;
   }
-  (void)vfprintf(stderr, fmt_buffer, ap);
+  OD_UNUSED(vfprintf(stderr, fmt_buffer, ap));
 
   return 0;
 }
@@ -244,8 +244,7 @@ int od_log_matrix_##N(od_log_facility facility, \
     return 0;  /* TODO: Real error value */ \
  \
   for (h=0; h<height; ++h) { \
-    for (w=0; w<width; ++w) { \
-re_format: \
+    for (w=0; w<width;) { \
       rv = snprintf(buffer + current_size, \
                     buffer_size - current_size, \
                     F, \
@@ -259,9 +258,10 @@ re_format: \
           return OD_EFAULT;  /* Out of memory */ \
         } \
         buffer = tmp; \
-        goto re_format; \
+        continue; \
       } \
       current_size += rv; \
+      ++w; \
     } \
   } \
  \

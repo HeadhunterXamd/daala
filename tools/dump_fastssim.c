@@ -13,6 +13,10 @@
 #endif
 #include "getopt.h"
 
+/*Implements the FastSSIM algorithm, see:
+  Chen, Ming-Jun, and Alan C. Bovik. "Fast structural similarity index
+   algorithm." Journal of Real-Time Image Processing 6.4 (2011): 281-287.*/
+
 const char *optstring = "cfrs";
 const struct option options[]={
   {"show-chroma",no_argument,NULL,'c'},
@@ -55,8 +59,8 @@ static void fs_ctx_init(fs_ctx *_ctx,int _w,int _h,int _nlevels){
   int            lw;
   int            lh;
   int            l;
-  lw=_w+1>>1;
-  lh=_h+1>>1;
+  lw = (_w + 1) >> 1;
+  lh = (_h + 1) >> 1;
   data_size=_nlevels*sizeof(fs_level)+2*(lw+8)*8*sizeof(*_ctx->col_buf);
   for(l=0;l<_nlevels;l++){
     size_t im_size;
@@ -68,15 +72,15 @@ static void fs_ctx_init(fs_ctx *_ctx,int _w,int _h,int _nlevels){
     level_size+=im_size;
     level_size*=sizeof(*_ctx->level[l].ssim);
     data_size+=level_size;
-    lw=lw+1>>1;
-    lh=lh+1>>1;
+    lw = (lw + 1) >> 1;
+    lh = (lh + 1) >> 1;
   }
   data=(unsigned char *)malloc(data_size);
   _ctx->level=(fs_level *)data;
   _ctx->nlevels=_nlevels;
   data+=_nlevels*sizeof(*_ctx->level);
-  lw=_w+1>>1;
-  lh=_h+1>>1;
+  lw = (_w + 1) >> 1;
+  lh = (_h + 1) >> 1;
   for(l=0;l<_nlevels;l++){
     size_t im_size;
     size_t level_size;
@@ -92,8 +96,8 @@ static void fs_ctx_init(fs_ctx *_ctx,int _w,int _h,int _nlevels){
     data+=level_size;
     _ctx->level[l].ssim=(double *)data;
     data+=im_size*sizeof(*_ctx->level[l].ssim);
-    lw=lw+1>>1;
-    lh=lh+1>>1;
+    lw = (lw + 1) >> 1;
+    lh = (lh + 1) >> 1;
   }
   _ctx->col_buf=(unsigned *)data;
 }
@@ -155,12 +159,12 @@ static void fs_downsample_level0(fs_ctx *_ctx,const unsigned char *_src1,
     int j0;
     int j1;
     j0=2*j;
-    j1=FS_MINI(j0+1,_h);
+    j1=FS_MINI(j0+1,_h-1);
     for(i=0;i<w;i++){
       int i0;
       int i1;
       i0=2*i;
-      i1=FS_MINI(i0+1,_w);
+      i1=FS_MINI(i0+1,_w-1);
       dst1[j*w+i]=_src1[j0*_s1ystride+i0]+_src1[j0*_s1ystride+i1]
        +_src1[j1*_s1ystride+i0]+_src1[j1*_s1ystride+i1];
       dst2[j*w+i]=_src2[j0*_s2ystride+i0]+_src2[j0*_s2ystride+i1]
@@ -196,6 +200,10 @@ static void fs_apply_luminance(fs_ctx *_ctx,int _l){
     for(i=0;i<w;i++)col_sums_y[i]+=im2[j1offs+i];
   }
   ssim=_ctx->level[_l].ssim;
+  /*4096 is a normalization constant for the luminance term.
+    See Section 3 of the FastSSIM paper, "The luminance term in Fast SSIM
+     utilizes an 8x8 square window."
+    mux and muy are the sum of 64 values: 64*64 == 4096.*/
   c1=(double)(SSIM_C1*4096*(1<<4*_l));
   for(j=0;j<h;j++){
     unsigned mux;
@@ -233,8 +241,8 @@ static void fs_apply_luminance(fs_ctx *_ctx,int _l){
   do{ \
     unsigned gx; \
     unsigned gy; \
-    gx=gx_buf[(j+(_joffs)&7)*stride+i+(_ioffs)]; \
-    gy=gy_buf[(j+(_joffs)&7)*stride+i+(_ioffs)]; \
+    gx = gx_buf[((j + (_joffs)) & 7)*stride + i + (_ioffs)]; \
+    gy = gy_buf[((j + (_joffs)) & 7)*stride + i + (_ioffs)]; \
     col_sums_gx2[(_col)]=gx*(double)gx; \
     col_sums_gy2[(_col)]=gy*(double)gy; \
     col_sums_gxgy[(_col)]=gx*(double)gy; \
@@ -245,8 +253,8 @@ static void fs_apply_luminance(fs_ctx *_ctx,int _l){
   do{ \
     unsigned gx; \
     unsigned gy; \
-    gx=gx_buf[(j+(_joffs)&7)*stride+i+(_ioffs)]; \
-    gy=gy_buf[(j+(_joffs)&7)*stride+i+(_ioffs)]; \
+    gx = gx_buf[((j + (_joffs)) & 7)*stride + i + (_ioffs)]; \
+    gy = gy_buf[((j + (_joffs)) & 7)*stride + i + (_ioffs)]; \
     col_sums_gx2[(_col)]+=gx*(double)gx; \
     col_sums_gy2[(_col)]+=gy*(double)gy; \
     col_sums_gxgy[(_col)]+=gx*(double)gy; \
@@ -257,8 +265,8 @@ static void fs_apply_luminance(fs_ctx *_ctx,int _l){
   do{ \
     unsigned gx; \
     unsigned gy; \
-    gx=gx_buf[(j+(_joffs)&7)*stride+i+(_ioffs)]; \
-    gy=gy_buf[(j+(_joffs)&7)*stride+i+(_ioffs)]; \
+    gx = gx_buf[((j + (_joffs)) & 7)*stride + i + (_ioffs)]; \
+    gy = gy_buf[((j + (_joffs)) & 7)*stride + i + (_ioffs)]; \
     col_sums_gx2[(_col)]-=gx*(double)gx; \
     col_sums_gy2[(_col)]-=gy*(double)gy; \
     col_sums_gxgy[(_col)]-=gx*(double)gy; \
@@ -313,6 +321,8 @@ static void fs_calc_structure(fs_ctx *_ctx,int _l){
   stride=w+8;
   gy_buf=gx_buf+8*stride;
   memset(gx_buf,0,2*8*stride*sizeof(*gx_buf));
+  /*104 is the sum of the "8x8 integer approximation to Gaussian window" in
+     Fig. 3 of the FastSSIM paper.*/
   c2=SSIM_C2*(1<<4*_l)*16*104;
   for(j=0;j<h+4;j++){
     if(j<h-1){
@@ -434,7 +444,7 @@ double calc_ssim(const unsigned char *_src,int _systride,
 
 static void usage(char *_argv[]){
   fprintf(stderr,"Usage: %s [options] <video1> <video2>\n"
-   "    <video1> and <video2> may be either YUV4MPEG or Ogg Theora files.\n\n"
+   "    <video1> and <video2> must be YUV4MPEG files.\n\n"
    "    Options:\n\n"
    "      -c --show-chroma Also show values for the chroma channels.\n"
    "      -f --frame-type  Show frame type and QI value for each Theora frame.\n"
@@ -531,7 +541,7 @@ int main(int _argc,char *_argv[]){
   gssim[0]=gssim[1]=gssim[2]=0;
   /*We just use a simple weighting to get a single full-color score.
     In reality the CSF for chroma is not the same as luma.*/
-  cweight=0.25*(4>>!(info1.pixel_fmt&1)+!(info1.pixel_fmt&2));
+  cweight = 0.25*(4 >> (!(info1.pixel_fmt & 1) + !(info1.pixel_fmt & 2)));
   for(frameno=0;;frameno++){
     video_input_ycbcr f1;
     video_input_ycbcr f2;
@@ -541,6 +551,7 @@ int main(int _argc,char *_argv[]){
     int             ret1;
     int             ret2;
     int             pli;
+    int             nplanes;
     ret1=video_input_fetch_frame(&vid1,f1,tag1);
     ret2=video_input_fetch_frame(&vid2,f2,tag2);
     if(ret1==0&&ret2==0)break;
@@ -556,7 +567,8 @@ int main(int _argc,char *_argv[]){
       break;
     }
     /*Okay, we got one frame from each.*/
-    for(pli=0;pli<3;pli++){
+    nplanes = show_chroma ? 3 : 1;
+    for(pli=0;pli<nplanes;pli++){
       int xdec;
       int ydec;
       xdec=pli&&!(info1.pixel_fmt&1);
@@ -566,8 +578,8 @@ int main(int _argc,char *_argv[]){
        f1[pli].stride,
        f2[pli].data+(info2.pic_y>>ydec)*f2[pli].stride+(info2.pic_x>>xdec),
        f2[pli].stride,
-       (info1.pic_x+info1.pic_w+xdec>>xdec)-(info1.pic_x>>xdec),
-       (info1.pic_y+info1.pic_h+ydec>>ydec)-(info1.pic_y>>ydec));
+       ((info1.pic_x + info1.pic_w + xdec) >> xdec) - (info1.pic_x >> xdec),
+       ((info1.pic_y + info1.pic_h + ydec) >> ydec) - (info1.pic_y >> ydec));
       gssim[pli]+=ssim[pli];
     }
     if(!summary_only){

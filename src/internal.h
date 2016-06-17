@@ -51,19 +51,38 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 
 /*Smallest blocks are 4x4*/
 # define OD_LOG_BSIZE0 (2)
-/*There are 4 block sizes total (4x4, 8x8, 16x16, 32x32).*/
-# define OD_NBSIZES    (4)
+/*There are 5 block sizes total (4x4, 8x8, 16x16, 32x32 and 64x64).*/
+# define OD_NBSIZES    (5)
 /*The log of the maximum length of the side of a block.*/
 # define OD_LOG_BSIZE_MAX (OD_LOG_BSIZE0 + OD_NBSIZES - 1)
 /*The maximum length of the side of a block.*/
 # define OD_BSIZE_MAX     (1 << OD_LOG_BSIZE_MAX)
+/*The maximum number of quad tree levels when splitting a super block.*/
+# define OD_MAX_SB_SPLITS (OD_NBSIZES - 1)
 
-/*Largest motion compensation partition sizes are 32x32.*/
-# define OD_LOG_MVBSIZE_MAX (5)
+/*Largest motion compensation partition sizes are 64x64.*/
+# define OD_LOG_MVBSIZE_MAX (6)
 # define OD_MVBSIZE_MAX (1 << OD_LOG_MVBSIZE_MAX)
-/*Smallest motion compensation partition sizes are 4x4.*/
-# define OD_LOG_MVBSIZE_MIN (2)
+/*Smallest motion compensation partition sizes are 8x8.*/
+# define OD_LOG_MVBSIZE_MIN (3)
 # define OD_MVBSIZE_MIN (1 << OD_LOG_MVBSIZE_MIN)
+
+/*The deringing filter is applied on 8x8 blocks, but it's application
+   is signaled on a 64x64 grid.*/
+# define OD_LOG_DERING_GRID (OD_BLOCK_64X64)
+
+/*The superblock resolution of the block size array.  Because four 4x4 blocks
+   and one 8x8 can be resolved with a single entry, this is the maximum number
+   of 8x8 blocks that can lie along a superblock edge.*/
+# define OD_BSIZE_GRID (1 << (OD_MAX_SB_SPLITS - 1))
+
+/*The number of 4x4 blocks that lie along a superblock edge.*/
+# define OD_FLAGS_GRID (1 << OD_MAX_SB_SPLITS)
+
+/*The log of the maximum length of the side of a block that
+   has optimized copy variants.*/
+# define OD_LOG_COPYBSIZE_MAX (6)
+
 /*log(2) of the spacing between level-0 MV grid points.*/
 # define OD_LOG_MVB_DELTA0 (OD_LOG_MVBSIZE_MAX - OD_LOG_MVBSIZE_MIN)
 /*The number of different MV block sizes.*/
@@ -79,26 +98,44 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 # define OD_MC_NLEVELS (OD_MC_LEVEL_MAX + 1)
 
 # define OD_LIMIT_BSIZE_MIN (OD_BLOCK_4X4)
-# define OD_LIMIT_BSIZE_MAX (OD_BLOCK_32X32)
-# if OD_LIMIT_BSIZE_MIN > OD_BLOCK_32X32 || OD_LIMIT_BSIZE_MAX > OD_BLOCK_32X32
-#  error "block sizes above 32x32 not supported"
+# define OD_LIMIT_BSIZE_MAX (OD_BLOCK_64X64)
+# if OD_LIMIT_BSIZE_MIN > OD_BLOCK_64X64 || OD_LIMIT_BSIZE_MAX > OD_BLOCK_64X64
+#  error "block sizes above 64x64 not supported"
 # endif
 # define OD_DISABLE_FILTER (0)
 # define OD_DEBLOCKING (0)
 # define OD_DISABLE_CFL (0)
+# define OD_CLOSED_GOP (0)
+/*Constants for frame QP modulation.*/
+# define OD_MQP_P (1.05)
+# define OD_MQP_B (1.1)
+# define OD_DQP_I (-2)
+# define OD_DQP_P (0)
+# define OD_DQP_B (1)
 
-# define OD_ROBUST_STREAM (0)
+# define OD_MAX_REORDER (16)
+
+# if (OD_MAX_REORDER & (OD_MAX_REORDER - 1))
+#  error "OD_MAX_REORDER must be a power of two."
+# endif
+
+# define OD_REORDER_INDEX(idx) ((idx)&(OD_MAX_REORDER - 1))
+
+# define OD_ROBUST_STREAM (1)
 
 # define OD_USE_HAAR_WAVELET (0)
 
-# define OD_SIGNAL_Q_SCALING (1)
+# define OD_SIGNAL_Q_SCALING (0)
 
 # define OD_COEFF_SHIFT (4)
+# define OD_COEFF_SCALE (1 << OD_COEFF_SHIFT)
 /*OD_QUALITY_SHIFT specifies the number of fractional bits in a
    passed in 'quality' parameter.
   For example, an OD_QUALITY_SHIFT of (4) specifies the quality parameter is
    in Q4 format.*/
 # define OD_QUALITY_SHIFT (4)
+# define OD_LOSSLESS(_ctx) ((_ctx)->state.quantizer == 0)
+# define OD_PLANE_SZ(_dim, _dec) (((_dim) + (1 << (_dec)) - 1) >> (_dec))
 
 # if defined(OD_ENABLE_ASSERTIONS)
 #  if OD_GNUC_PREREQ(2, 5, 0)
@@ -131,6 +168,14 @@ void od_fatal_impl(const char *_str, const char *_file, int _line);
 #  define OD_ASSERT2(_cond, _message)
 #  define OD_ALWAYS_TRUE(_cond) ((void)(_cond))
 # endif
+
+/*Like OD_ASSERT, but return an error code instead of terminating.*/
+# define OD_RETURN_CHECK(_cond, _err) \
+  do { \
+    if (!(_cond)) { \
+      return (_err); \
+    } \
+  } while(0)
 
 # define OD_MEM_SIZE_MAX (~(size_t)0 >> 1)
 # define OD_MEM_DIFF_MAX ((ptrdiff_t)OD_MEM_SIZE_MAX)
@@ -186,7 +231,7 @@ void **od_malloc_2d(size_t _height, size_t _width, size_t _sz);
 void **od_calloc_2d(size_t _height, size_t _width, size_t _sz);
 void od_free_2d(void *_ptr);
 
-# define OD_DIVU_DMAX (64)
+# define OD_DIVU_DMAX (1024)
 
 extern uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2];
 
@@ -195,5 +240,8 @@ extern uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2];
   ((uint32_t)((OD_DIVU_SMALL_CONSTS[(_d)-1][0]* \
   (unsigned long long)(_x)+OD_DIVU_SMALL_CONSTS[(_d)-1][1])>>32)>> \
   (OD_ILOG(_d)-1))
+
+# define OD_DIVU(_x, _d) \
+  (((_d) < OD_DIVU_DMAX)?(OD_DIVU_SMALL((_x),(_d))):((_x)/(_d)))
 
 #endif

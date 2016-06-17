@@ -37,8 +37,6 @@ struct daala_dec_ctx {
   od_state state;
   oggbyte_buffer obb;
   od_ec_dec ec;
-  int coded_quantizer[OD_NPLANES_MAX];
-  int quantizer[OD_NPLANES_MAX];
   int packet_state;
   /*User provided buffer for storing per frame block size information. These
    are set via daala_decode_ctl with OD_DECCTL_SET_BSIZE_BUFFER.*/
@@ -49,12 +47,23 @@ struct daala_dec_ctx {
   unsigned int *user_flags;
   int user_fstride;
   od_mv_grid_pt *user_mv_grid;
-  od_img *user_mc_img;
+  daala_image *user_mc_img;
+  od_output_queue out;
 #if OD_ACCOUNTING
   int acct_enabled;
   od_accounting_internal acct;
 #endif
+  /*User provided buffer for storing the deringing filter flags per superblock.
+    This is set via daala_decode_ctl with OD_DECCTL_SET_DERING_BUFFER.*/
+  unsigned char *user_dering;
 };
+
+# if OD_ACCOUNTING
+#  define OD_ACCOUNTING_SET_LOCATION(dec, layer, level, x, y) \
+  od_accounting_set_location(&(dec)->acct, layer, level, x, y)
+# else
+#  define OD_ACCOUNTING_SET_LOCATION(dec, layer, level, x, y)
+# endif
 
 /*Stub for the daala_setup_info.*/
 struct daala_setup_info {

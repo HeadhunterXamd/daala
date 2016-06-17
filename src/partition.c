@@ -32,19 +32,19 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 
 /* The tables below specify how coefficient blocks are translated to
    and from PVQ partition coding scan order for 4x4, 8x8 and 16x16 */
-static const int OD_LAYOUT64_OFFSETS[4] = { 0, 512, 1024, 3072 };
+static const int OD_LAYOUT64_OFFSETS[4] = { 0, };
 const band_layout OD_LAYOUT64 = {
   OD_ZIGZAG64,
   64,
-  3,
+  0,
   OD_LAYOUT64_OFFSETS
 };
 
-static const int OD_LAYOUT32_OFFSETS[4] = { 0, 128, 256, 768};
+static const int OD_LAYOUT32_OFFSETS[4] = { 0, 128, 256};
 const band_layout OD_LAYOUT32 = {
   OD_ZIGZAG32,
   32,
-  3,
+  2,
   OD_LAYOUT32_OFFSETS
 };
 
@@ -77,10 +77,10 @@ const band_layout OD_LAYOUT4 = {
 static const int OD_BAND_OFFSETS4[] = {1, 1, 16};
 static const int OD_BAND_OFFSETS8[] = {4, 1, 16, 24, 32, 64};
 static const int OD_BAND_OFFSETS16[] = {7, 1, 16, 24, 32, 64, 96, 128, 256};
-static const int OD_BAND_OFFSETS32[] = {10, 1, 16, 24, 32, 64, 96, 128, 256,
- 384, 512, 1024};
-static const int OD_BAND_OFFSETS64[] = {13, 1, 16, 24, 32, 64, 96, 128, 256,
- 384, 512, 1024, 1536, 2048, 4096};
+static const int OD_BAND_OFFSETS32[] = {9, 1, 16, 24, 32, 64, 96, 128, 256,
+ 384, 512};
+static const int OD_BAND_OFFSETS64[] = {9, 1, 16, 24, 32, 64, 96, 128, 256,
+ 384, 512};
 
 const int *const OD_BAND_OFFSETS[OD_NBSIZES + 1] = {
   OD_BAND_OFFSETS4,
@@ -99,7 +99,7 @@ const int *const OD_BAND_OFFSETS[OD_NBSIZES + 1] = {
  * @param [int]    int     source vector row stride
  */
 static void od_band_from_raster(const band_layout *layout, od_coeff *dst,
- od_coeff *src, int stride) {
+ const od_coeff *src, int stride) {
   int i;
   int len;
   len = layout->band_offsets[layout->nb_bands];
@@ -117,7 +117,7 @@ static void od_band_from_raster(const band_layout *layout, od_coeff *dst,
  * @param [int]    stride  destination vector row stride
  */
 static void od_raster_from_band(const band_layout *layout, od_coeff *dst,
- int stride, od_coeff *src) {
+ int stride, const od_coeff *src) {
   int i;
   int len;
   len = layout->band_offsets[layout->nb_bands];
@@ -125,6 +125,9 @@ static void od_raster_from_band(const band_layout *layout, od_coeff *dst,
     dst[layout->dst_table[i][1]*stride + layout->dst_table[i][0]] = src[i];
   }
 }
+
+static const band_layout *const OD_LAYOUTS[] = {&OD_LAYOUT4, &OD_LAYOUT8,
+ &OD_LAYOUT16, &OD_LAYOUT32, &OD_LAYOUT64};
 
 /** Converts a coefficient block in raster order into a vector in
  * coding scan order with the PVQ partitions laid out one after
@@ -137,24 +140,23 @@ static void od_raster_from_band(const band_layout *layout, od_coeff *dst,
  * @param [in]     n          block size (along one side)
  * @param [in]     src        source coefficient block
  * @param [in]     stride     source vector row stride
- * @param [in]     interleave interleaves entries for the scalar
-                              (non-pvq) case
  */
-void od_raster_to_coding_order(od_coeff *dst,  int n, od_coeff *src,
+void od_raster_to_coding_order(od_coeff *dst, int n, const od_coeff *src,
  int stride) {
-  /* TODO - Rewrite these as a loop. */
-  od_band_from_raster(&OD_LAYOUT4, dst + 1, src, stride);
-  if (n >= 8) {
-    od_band_from_raster(&OD_LAYOUT8, dst + 16, src, stride);
-  }
-  if (n >= 16) {
-    od_band_from_raster(&OD_LAYOUT16, dst + 64, src, stride);
-  }
-  if (n >= 32) {
-    od_band_from_raster(&OD_LAYOUT32, dst + 256, src, stride);
-  }
-  if (n >= 64) {
-    od_band_from_raster(&OD_LAYOUT64, dst + 1024, src, stride);
+  int bs;
+  /* dst + 1 because DC is not included for 4x4 blocks. */
+  od_band_from_raster(OD_LAYOUTS[0], dst + 1, src, stride);
+  for (bs = 1; bs < OD_NBSIZES; bs++) {
+    int size;
+    int offset;
+    /* Length of block size > 4. */
+    size = 1 << (OD_LOG_BSIZE0 + bs);
+    /* Offset is the size of the previous block squared. */
+    offset = 1 << 2*(OD_LOG_BSIZE0 - 1 + bs);
+    if (n >= size) {
+      /* 3 16x16 bands come after 3 8x8 bands, which come after 2 4x4 bands. */
+      od_band_from_raster(OD_LAYOUTS[bs], dst + offset, src, stride);
+    }
   }
   dst[0] = src[0];
 }
@@ -170,24 +172,73 @@ void od_raster_to_coding_order(od_coeff *dst,  int n, od_coeff *src,
  * @param [in]     stride     destination vector row stride
  * @param [in]     src        source vector
  * @param [in]     n          block size (along one side)
- * @param [in]     interleave de-interleaves entries for
-                              the scalar (non-pvq) case
  */
-void od_coding_order_to_raster(od_coeff *dst,  int stride, od_coeff *src,
+void od_coding_order_to_raster(od_coeff *dst, int stride, const od_coeff *src,
  int n) {
-  /* TODO - Rewrite these as a loop. */
-  od_raster_from_band(&OD_LAYOUT4, dst, stride, src + 1);
-  if (n >= 8) {
-    od_raster_from_band(&OD_LAYOUT8, dst, stride, src + 16);
+  int bs;
+  /* src + 1 because DC is not included for 4x4 blocks. */
+  od_raster_from_band(OD_LAYOUTS[0], dst, stride, src + 1);
+  for (bs = 1; bs < OD_NBSIZES; bs++) {
+    int size;
+    int offset;
+    /* Length of block size > 4 */
+    size = 1 << (OD_LOG_BSIZE0 + bs);
+    /* Offset is the size of the previous block squared. */
+    offset = 1 << 2*(OD_LOG_BSIZE0 - 1 + bs);
+    if (n >= size) {
+      /* 3 16x16 bands come after 3 8x8 bands, which come after 2 4x4 bands. */
+      od_raster_from_band(OD_LAYOUTS[bs], dst, stride, src + offset);
+    }
   }
-  if (n >= 16) {
-    od_raster_from_band(&OD_LAYOUT16, dst, stride, src + 64);
+  dst[0] = src[0];
+}
+
+/** Perform a single stage of conversion from a coefficient block in
+ * raster order into coding scan order
+ *
+ * @param [in]     layout  scan order specification
+ * @param [out]    dst     destination vector
+ * @param [in]     src     source coefficient block
+ * @param [int]    int     source vector row stride
+ */
+static void od_band_from_raster_16(const band_layout *layout, int16_t *dst,
+ const int16_t *src, int stride) {
+  int i;
+  int len;
+  len = layout->band_offsets[layout->nb_bands];
+  for (i = 0; i < len; i++) {
+    dst[i] = src[layout->dst_table[i][1]*stride + layout->dst_table[i][0]];
   }
-  if (n >= 32) {
-    od_raster_from_band(&OD_LAYOUT32, dst, stride, src + 256);
-  }
-  if (n >= 64) {
-    od_raster_from_band(&OD_LAYOUT64, dst, stride, src + 1024);
+}
+
+/** Converts a coefficient block in raster order into a vector in
+ * coding scan order with the PVQ partitions laid out one after
+ * another.  This works in stages; the 4x4 conversion is applied to
+ * the coefficients nearest DC, then the 8x8 applied to the 8x8 block
+ * nearest DC that was not already coded by 4x4, then 16x16 following
+ * the same pattern.
+ *
+ * @param [out]    dst        destination vector
+ * @param [in]     n          block size (along one side)
+ * @param [in]     src        source coefficient block
+ * @param [in]     stride     source vector row stride
+ */
+void od_raster_to_coding_order_16(int16_t *dst, int n, const int16_t *src,
+ int stride) {
+  int bs;
+  /* dst + 1 because DC is not included for 4x4 blocks. */
+  od_band_from_raster_16(OD_LAYOUTS[0], dst + 1, src, stride);
+  for (bs = 1; bs < OD_NBSIZES; bs++) {
+    int size;
+    int offset;
+    /* Length of block size > 4. */
+    size = 1 << (OD_LOG_BSIZE0 + bs);
+    /* Offset is the size of the previous block squared. */
+    offset = 1 << 2*(OD_LOG_BSIZE0 - 1 + bs);
+    if (n >= size) {
+      /* 3 16x16 bands come after 3 8x8 bands, which come after 2 4x4 bands. */
+      od_band_from_raster_16(OD_LAYOUTS[bs], dst + offset, src, stride);
+    }
   }
   dst[0] = src[0];
 }

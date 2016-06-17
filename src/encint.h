@@ -30,6 +30,9 @@ typedef struct od_params_ctx od_params_ctx;
 typedef struct od_mv_est_ctx od_mv_est_ctx;
 typedef struct od_enc_opt_vtbl od_enc_opt_vtbl;
 typedef struct od_rollback_buffer od_rollback_buffer;
+typedef struct od_input_queue od_input_queue;
+typedef struct od_input_frame od_input_frame;
+typedef struct od_rc_state od_rc_state;
 
 # include "../include/daala/daaladec.h"
 # include "../include/daala/daalaenc.h"
@@ -48,6 +51,8 @@ typedef struct od_rollback_buffer od_rollback_buffer;
    \lambda*R.*/
 # define OD_ERROR_SCALE        (OD_LAMBDA_SCALE + OD_BITRES)
 
+/*The complexity setting where we enable MV refinement.*/
+# define OD_MC_REFINEMENT_COMPLEXITY (5)
 /*The complexity setting where we enable a square pattern in basic (fullpel)
    MV refinement.*/
 # define OD_MC_SQUARE_REFINEMENT_COMPLEXITY (8)
@@ -59,22 +64,45 @@ typedef struct od_rollback_buffer od_rollback_buffer;
 # define OD_MC_SQUARE_SUBPEL_REFINEMENT_COMPLEXITY (10)
 
 struct od_enc_opt_vtbl {
-  int (*mc_compute_sad_4x4_xstride_1)(const unsigned char *src,
+  int32_t (*mc_compute_sad_4x4)(const unsigned char *src,
    int systride, const unsigned char *ref, int dystride);
-  int (*mc_compute_sad_8x8_xstride_1)(const unsigned char *src,
+  int32_t (*mc_compute_sad_8x8)(const unsigned char *src,
    int systride, const unsigned char *ref, int dystride);
-  int (*mc_compute_sad_16x16_xstride_1)(const unsigned char *src,
+  int32_t (*mc_compute_sad_16x16)(const unsigned char *src,
    int systride, const unsigned char *ref, int dystride);
-  int (*mc_compute_sad_32x32_xstride_1)(const unsigned char *src,
+  int32_t (*mc_compute_sad_32x32)(const unsigned char *src,
    int systride, const unsigned char *ref, int dystride);
-  int (*mc_compute_satd_4x4)(const unsigned char *src,
+  int32_t (*mc_compute_sad_64x64)(const unsigned char *src,
    int systride, const unsigned char *ref, int dystride);
-  int (*mc_compute_satd_8x8)(const unsigned char *src,
+  int32_t (*mc_compute_satd_4x4)(const unsigned char *src,
    int systride, const unsigned char *ref, int dystride);
-  int (*mc_compute_satd_16x16)(const unsigned char *src,
+  int32_t (*mc_compute_satd_8x8)(const unsigned char *src,
    int systride, const unsigned char *ref, int dystride);
-  int (*mc_compute_satd_32x32)(const unsigned char *src,
+  int32_t (*mc_compute_satd_16x16)(const unsigned char *src,
    int systride, const unsigned char *ref, int dystride);
+  int32_t (*mc_compute_satd_32x32)(const unsigned char *src,
+   int systride, const unsigned char *ref, int dystride);
+  int32_t (*mc_compute_satd_64x64)(const unsigned char *src,
+   int systride, const unsigned char *ref, int dystride);
+};
+
+/*Rate control setup and working state information.*/
+struct od_rc_state {
+  /*The target bit-rate in bits per second.*/
+  long target_bitrate;
+  /*The number of frames over which to distribute the reservoir usage.*/
+  int reservoir_frame_delay;
+  /*Will we drop frames to meet bitrate target?*/
+  unsigned char drop_frames;
+  /*Do we respect the maximum reservoir fullness?*/
+  unsigned char cap_overflow;
+  /*Can the reservoir go negative?*/
+  unsigned char cap_underflow;
+  /*Two-pass mode state.
+    0 => 1-pass encoding.
+    1 => 1st pass of 2-pass encoding.
+    2 => 2nd pass of 2-pass encoding.*/
+  int twopass_state;
 };
 
 /*Unsanitized user parameters*/
@@ -85,20 +113,70 @@ struct od_params_ctx {
   int mv_level_max;
 };
 
+struct od_input_frame {
+  daala_image *img;
+  int duration;
+  int type;
+  int number;
+  /* TODO add reference info */
+};
+
+struct od_input_queue {
+  unsigned char *input_img_data;
+
+  /* Circular queue of frame input images in display order. */
+  daala_image images[OD_MAX_REORDER];
+  int duration[OD_MAX_REORDER];
+  int input_head;
+  int input_size;
+
+  /* Circular queue of frame indeces in encode order. */
+  od_input_frame frames[OD_MAX_REORDER];
+  int encode_head;
+  int encode_size;
+
+  /* Input queue parameters */
+  int keyframe_rate;
+  int frame_delay;
+
+  /* Input queue state */
+  int frame_number;
+  int last_keyframe;
+  int end_of_input;
+  int closed_gop;
+};
+
 struct daala_enc_ctx{
   od_state state;
   od_enc_opt_vtbl opt_vtbl;
   oggbyte_buffer obb;
   od_ec_enc ec;
   int packet_state;
-  int quality[OD_NPLANES_MAX];
-  int quantizer[OD_NPLANES_MAX];
-  int coded_quantizer[OD_NPLANES_MAX];
+  int quality;
   int complexity;
   int use_activity_masking;
+  int use_dering;
   int use_satd;
   int qm;
   int use_haar_wavelet;
+  int b_frames;
+  /*The quantizer value we wish we could use if we were able to
+     code any possible quantizer value to the stream.
+    This value is not used in any quantization, but it is used to
+     compute lambda values for RDO decisions.*/
+  int target_quantizer;
+  /*Motion estimation RDO lambda.*/
+  int mv_rdo_lambda;
+  /*The blocksize RDO lambda.*/
+  double bs_rdo_lambda;
+  /*The PVQ RDO lambda is used for RDO calculations involving unquantized
+     data.*/
+  double pvq_rdo_lambda;
+  /*Normalized PVQ lambda for use where we've already performed
+     quantization.*/
+  double pvq_norm_lambda;
+  /*The deringing filter RDO lambda.*/
+  double dering_lambda;
   od_mv_est_ctx *mvest;
   od_params_ctx params;
 #if defined(OD_ENCODER_CHECK)
@@ -120,6 +198,35 @@ struct daala_enc_ctx{
   od_coeff block_c_orig[OD_BSIZE_MAX*OD_BSIZE_MAX];
   od_coeff block_mc_orig[OD_BSIZE_MAX*OD_BSIZE_MAX];
   od_coeff block_c_noskip[OD_BSIZE_MAX*OD_BSIZE_MAX];
+  /* This structure manages reordering the input frames from display order
+      to encode order.
+     It currently supports in order B-frames with a periodic out of order
+      P-frame specified by enc->b_frames.*/
+  od_input_queue input_queue;
+  /* A pointer to the currently encoding image. */
+  daala_image *curr_img;
+  /** Frame delay. */
+  int frame_delay;
+  /** Displaying order of current frame being encoded. */
+  int64_t curr_display_order;
+  /** Coding order of current frame being encoded. */
+  int64_t curr_coding_order;
+  /** Number of I or P frames encoded so far, starting from zero. */
+  int64_t ip_frame_count;
+  /** Setup and state used to drive rate control. */
+  od_rc_state rc;
+#if defined(OD_DUMP_RECONS)
+  od_output_queue out;
+#endif
+#if defined(OD_DUMP_IMAGES)
+  unsigned char *dump_img_data;
+  daala_image vis_img;
+  daala_image tmp_vis_img;
+  unsigned char *upsample_line_buf[8];
+# if defined(OD_ANIMATE)
+  int ani_iter;
+# endif
+#endif
 };
 
 /** Holds important encoder information so we can roll back decisions */
@@ -128,32 +235,77 @@ struct od_rollback_buffer {
   od_adapt_ctx adapt;
 };
 
+int od_frame_type(daala_enc_ctx *enc, int64_t coding_frame_count,
+ int *is_golden, int64_t *ip_count);
 void od_encode_checkpoint(const daala_enc_ctx *enc, od_rollback_buffer *rbuf);
 void od_encode_rollback(daala_enc_ctx *enc, const od_rollback_buffer *rbuf);
 
 od_mv_est_ctx *od_mv_est_alloc(od_enc_ctx *enc);
 void od_mv_est_free(od_mv_est_ctx *est);
-void od_mv_est(od_mv_est_ctx *est, int lambda);
+void od_mv_est(od_mv_est_ctx *est, int lambda, int num_refs);
 
-int od_mc_compute_sad_4x4_xstride_1_c(const unsigned char *src, int systride,
+int od_enc_rc_init(od_enc_ctx *enc, long bitrate);
+int od_enc_rc_resize(od_enc_ctx *enc);
+void od_enc_rc_clear(od_enc_ctx *enc);
+void od_enc_rc_select_quantizers_and_lambdas(od_enc_ctx *enc,
+ int is_golden_frame, int frame_type);
+int od_enc_rc_update_state(od_enc_ctx *enc, long bits,
+ int is_golden_frame, int frame_type, int droppable);
+int od_enc_rc_2pass_out(od_enc_ctx *enc, unsigned char **buf);
+int od_enc_rc_2pass_in(od_enc_ctx *enc, unsigned char *buf, size_t bytes);
+
+int32_t od_mc_compute_sad8_4x4_c(const unsigned char *src, int systride,
  const unsigned char *ref, int dystride);
-int od_mc_compute_sad_8x8_xstride_1_c(const unsigned char *src, int systride,
+int32_t od_mc_compute_sad8_8x8_c(const unsigned char *src, int systride,
  const unsigned char *ref, int dystride);
-int od_mc_compute_sad_16x16_xstride_1_c(const unsigned char *src, int systride,
+int32_t od_mc_compute_sad8_16x16_c(const unsigned char *src, int systride,
  const unsigned char *ref, int dystride);
-int od_mc_compute_sad_32x32_xstride_1_c(const unsigned char *src, int systride,
+int32_t od_mc_compute_sad8_32x32_c(const unsigned char *src, int systride,
  const unsigned char *ref, int dystride);
-int od_mc_compute_sad_c(const unsigned char *_src, int _systride,
- const unsigned char *_ref, int _dystride, int _dxstride, int _w, int _h);
-int od_mc_compute_satd_4x4_c(const unsigned char *src, int systride,
+int32_t od_mc_compute_sad8_64x64_c(const unsigned char *src, int systride,
  const unsigned char *ref, int dystride);
-int od_mc_compute_satd_8x8_c(const unsigned char *src, int systride,
+int32_t od_mc_compute_sad8_c(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride, int w, int h);
+int32_t od_mc_compute_satd8_4x4_c(const unsigned char *src, int systride,
  const unsigned char *ref, int dystride);
-int od_mc_compute_satd_16x16_c(const unsigned char *src, int systride,
+int32_t od_mc_compute_satd8_8x8_c(const unsigned char *src, int systride,
  const unsigned char *ref, int dystride);
-int od_mc_compute_satd_32x32_c(const unsigned char *src, int systride,
+int32_t od_mc_compute_satd8_16x16_c(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_satd8_32x32_c(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_satd8_64x64_c(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_sad16_4x4_c(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_sad16_8x8_c(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_sad16_16x16_c(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_sad16_32x32_c(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_sad16_64x64_c(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_sad16_c(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride, int w, int h);
+int32_t od_mc_compute_satd16_4x4_c(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_satd16_8x8_c(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_satd16_16x16_c(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_satd16_32x32_c(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_satd16_64x64_c(const unsigned char *src, int systride,
  const unsigned char *ref, int dystride);
 void od_enc_opt_vtbl_init_c(od_enc_ctx *enc);
+
+# if defined(OD_DUMP_IMAGES)
+void od_encode_fill_vis(daala_enc_ctx *enc);
+void daala_image_draw_line(daala_image *img, int x0, int y0, int x1, int y1,
+ const unsigned char ycbcr[3]);
+void od_state_draw_mvs(daala_enc_ctx *enc);
+# endif
 
 # if defined(OD_X86ASM)
 void od_enc_opt_vtbl_init_x86(od_enc_ctx *enc);

@@ -28,7 +28,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #endif
 
 #include <stdlib.h>
+#include <limits.h>
 #include "filter.h"
+#include "state.h"
 #include "block_size.h"
 
 /*Pre-/post-filter pairs of various sizes.
@@ -124,9 +126,6 @@ const od_filter_func OD_POST_FILTER[OD_NBSIZES] = {
   od_post_filter32
 };
 
-/** Strength of the bilinear smoothing for each plane. */
-static const int OD_BILINEAR_STRENGTH[OD_NPLANES_MAX] = {5, 20, 20, 5};
-
 /*Filter parameters for the pre/post filters.
   When changing these the intra-predictors in
   initdata.c must be updated.*/
@@ -208,10 +207,10 @@ void od_post_filter4(od_coeff _x[4], const od_coeff _y[4]) {
   t[2] -= (t[3]*OD_FILTER_PARAMS4_3+32)>>6;
   t[3] -= (t[2]*OD_FILTER_PARAMS4_2+32)>>6;
 #if OD_FILTER_PARAMS4_1 != 64
-  t[3] = (t[3]<<6)/OD_FILTER_PARAMS4_1;
+  t[3] = t[3]*(1 << 6)/OD_FILTER_PARAMS4_1;
 #endif
 #if OD_FILTER_PARAMS4_0 != 64
-  t[2] = (t[2]<<6)/OD_FILTER_PARAMS4_0;
+  t[2] = t[2]*(1 << 6)/OD_FILTER_PARAMS4_0;
 #endif
   t[0] += t[3]>>1;
   _x[0] = (od_coeff)t[0];
@@ -1457,29 +1456,34 @@ void od_thor_deblock_row8(od_coeff *c0, int stride, int q) {
 #define OD_BLOCK_SIZE4x4_DEC(bsize, bstride, bx, by, dec) \
  OD_MAXI(OD_BLOCK_SIZE4x4(bsize, bstride, bx, by), dec)
 
-void od_prefilter_split(od_coeff *c0, int stride, int bs, int f) {
+void od_prefilter_split(od_coeff *c0, int stride, int bs, int f, int hfilter,
+ int vfilter) {
 #if OD_DEBLOCKING
 #else
   int i;
   int j;
   od_coeff *c;
-  c = c0 + ((2 << bs) - (2 << f))*stride;
-  for (j = 0; j < 4 << bs; j++) {
-    int k;
-    od_coeff t[4 << OD_NBSIZES];
-    for (k = 0; k < 4 << f; k++) t[k] = c[stride*k + j];
-    (*OD_PRE_FILTER[f])(t, t);
-    for (k = 0; k < 4 << f; k++) c[stride*k + j] = t[k];
+  if (hfilter) {
+    c = c0 + ((2 << bs) - (2 << f))*stride;
+    for (j = 0; j < 4 << bs; j++) {
+      int k;
+      od_coeff t[4 << OD_NBSIZES];
+      for (k = 0; k < 4 << f; k++) t[k] = c[stride*k + j];
+      (*OD_PRE_FILTER[f])(t, t);
+      for (k = 0; k < 4 << f; k++) c[stride*k + j] = t[k];
+    }
   }
-  c = c0 + (2 << bs) - (2 << f);
-  for (i = 0; i < 4 << bs; i++) {
-    (*OD_PRE_FILTER[f])(c + i*stride, c + i*stride);
+  if (vfilter) {
+    c = c0 + (2 << bs) - (2 << f);
+    for (i = 0; i < 4 << bs; i++) {
+      (*OD_PRE_FILTER[f])(c + i*stride, c + i*stride);
+    }
   }
 #endif
 }
 
 void od_postfilter_split(od_coeff *c0, int stride, int bs, int f, int q,
- unsigned char *skip, int skip_stride) {
+ unsigned char *skip, int skip_stride, int hfilter, int vfilter) {
   int i;
   od_coeff *c;
 #if OD_DEBLOCKING
@@ -1500,20 +1504,24 @@ void od_postfilter_split(od_coeff *c0, int stride, int bs, int f, int q,
   }
 #else
   int j;
-  (void)q;
-  (void)skip;
-  (void)skip_stride;
-  c = c0 + (2 << bs) - (2 << f);
-  for (i = 0; i < 4 << bs; i++) {
-    (*OD_POST_FILTER[f])(c + i*stride, c + i*stride);
+  OD_UNUSED(q);
+  OD_UNUSED(skip);
+  OD_UNUSED(skip_stride);
+  if (vfilter) {
+    c = c0 + (2 << bs) - (2 << f);
+    for (i = 0; i < 4 << bs; i++) {
+      (*OD_POST_FILTER[f])(c + i*stride, c + i*stride);
+    }
   }
-  c = c0 + ((2 << bs) - (2 << f))*stride;
-  for (j = 0; j < 4 << bs; j++) {
-    int k;
-    od_coeff t[4 << OD_NBSIZES];
-    for (k = 0; k < 4 << f; k++) t[k] = c[stride*k + j];
-    (*OD_POST_FILTER[f])(t, t);
-    for (k = 0; k < 4 << f; k++) c[stride*k + j] = t[k];
+  if (hfilter) {
+    c = c0 + ((2 << bs) - (2 << f))*stride;
+    for (j = 0; j < 4 << bs; j++) {
+      int k;
+      od_coeff t[4 << OD_NBSIZES];
+      for (k = 0; k < 4 << f; k++) t[k] = c[stride*k + j];
+      (*OD_POST_FILTER[f])(t, t);
+      for (k = 0; k < 4 << f; k++) c[stride*k + j] = t[k];
+    }
   }
 #endif
 }
@@ -1585,9 +1593,9 @@ void od_apply_postfilter_frame_sbs(od_coeff *c0, int stride, int nhsb,
   int j;
   int f;
   od_coeff *c;
-  (void)q;
-  (void)skip;
-  (void)skip_stride;
+  OD_UNUSED(q);
+  OD_UNUSED(skip);
+  OD_UNUSED(skip_stride);
   f = OD_FILT_SIZE(OD_NBSIZES - 1, xdec);
   c = c0 + (OD_BSIZE_MAX >> ydec) - (2 << f);
   for (sbx = 1; sbx < nhsb; sbx++) {
@@ -1610,139 +1618,7 @@ void od_apply_postfilter_frame_sbs(od_coeff *c0, int stride, int nhsb,
 #endif
 }
 
-/*Smooths a block using the constrained lowpass filter from Thor
-  (https://tools.ietf.org/html/draft-fuldseth-netvc-thor-00#section-8.2).*/
-void od_clpf(od_coeff *y, int ystride, od_coeff *x, int xstride, int ln,
- int sbx, int sby, int nhsb, int nvsb) {
-  int i;
-  int j;
-  int n;
-  int delta;
-  int sum;
-  int sign;
-  od_coeff aa;
-  od_coeff bb;
-  od_coeff cc;
-  od_coeff dd;
-  od_coeff xx;
-  n = 1 << ln;
-  for (i = 0; i < n; i++) {
-    for (j = 0; j < n; j++) {
-      xx = x[i*xstride + j];
-      if (sby > 0 || i > 0) aa = x[(i - 1)*xstride + j];
-      else aa = xx;
-      if (sbx > 0 || j > 0) bb = x[i*xstride + (j - 1)];
-      else bb = xx;
-      if (sbx < nhsb - 1 || j < n - 1) cc = x[i*xstride + (j + 1)];
-      else cc = xx;
-      if (sby < nvsb - 1 || i < n - 1) dd = x[(i + 1)*xstride + j];
-      else dd = xx;
-      sum = aa + bb + cc + dd - 4*xx;
-      sign = sum < 0 ? -1 : 1;
-      if (abs(sum) > (16 << OD_COEFF_SHIFT)) {
-        /*Turn off the filter at a threshold of 16 pixels. This gives an
-          improvement over Thor's, but needs more tuning probably. Values of 8,
-          16, 32, and 64 were tried, with this being the best.*/
-        delta = 0;
-      }
-      else {
-        delta = sign * OD_MINI(1 << OD_COEFF_SHIFT, (abs(sum) + 2) >> 2);
-      }
-      y[i*ystride + j] = xx + delta;
-    }
-  }
-}
 
-/** Smoothes a block using bilinear interpolation from its four corners.
- *  The interpolation is applied using a weight that depends on the amount
- *  amount of distortion it causes to the signal compared to the quantization
- *  noise.
- * @param [in,out] x      block pixels
- * @param [in]     ln     log2 of block size
- * @param [in]     stride stride of x
- * @param [in]     q      quantizer
- * @param [in]     pli    plane index
- */
-void od_bilinear_smooth(od_coeff *x, int ln, int stride, int q, int pli) {
-  od_coeff x00;
-  od_coeff x01;
-  od_coeff x10;
-  od_coeff x11;
-  od_coeff a00;
-  od_coeff a01;
-  od_coeff a10;
-  od_coeff a11;
-  od_coeff y[OD_BSIZE_MAX][OD_BSIZE_MAX];
-  od_coeff dist;
-  int w;
-  int i;
-  int j;
-  int n;
-  n = 1 << ln;
-  x00 = x[0];
-  x01 = x[n - 1];
-  x10 = x[(n - 1)*stride];
-  x11 = x[(n - 1)*stride + (n - 1)];
-  a00 = x00;
-  a01 = x01 - x00;
-  a10 = x10 - x00;
-  a11 = x11 + x00 - x10 - x01;
-  /* Multiply by 1+1/n (approximation of n/(n-1)) here so that we can divide
-     by n in the loop instead of dividing by n-1. */
-  a01 += (a01 + n/2) >> ln;
-  a10 += (a10 + n/2) >> ln;
-  a11 += (2*a10 + n/2) >> ln;
-  dist = 0;
-  /* Bilinear interpolation with non-linear x*y term. */
-  for (i = 0; i < n; i++) {
-    for (j = 0; j < n; j++) {
-      y[i][j] = a00 + ((j*a01 + i*a10 + (j*i*a11 >> ln) + n/2) >> ln);
-      dist += (y[i][j] - x[i*stride + j])*(y[i][j] - x[i*stride + j]);
-    }
-  }
-  dist >>= 2*ln;
-  /* Compute 1 - Wiener filter gain = strength * (q^2/12) / dist. */
-  w = OD_MINI(1024, OD_BILINEAR_STRENGTH[pli]*q*q/(1 + 12*dist));
-  /* Square the theoretical gain to attenuate the effect when we're unsure
-     whether it's useful. */
-  w = w*w >> 12;
-  for (i = 0; i < n; i++) {
-    for (j = 0; j < n; j++) {
-      x[i*stride + j] -= (w*(x[i*stride + j]-y[i][j]) + 128) >> 8;
-    }
-  }
-}
-
-void od_smooth_recursive(od_coeff *c, unsigned char *bsize, int bstride,
- int bx, int by, int bsi, int w, int xdec, int ydec, int min_bs,
- int quantizer, int pli) {
-  int obs;
-  int bs;
-  /*This code assumes 4:4:4 or 4:2:0 input.*/
-  OD_ASSERT(xdec == ydec);
-  obs = OD_BLOCK_SIZE4x4(bsize, bstride, bx << bsi, by << bsi);
-  bs = OD_MAXI(obs, xdec);
-  OD_ASSERT(bs <= bsi);
-  if (bs == bsi) {
-    if (bs >= min_bs) {
-      bs += OD_LOG_BSIZE0 - xdec;
-      od_bilinear_smooth(&c[(by << bs)*w + (bx << bs)], bs, w, quantizer, pli);
-    }
-  }
-  else {
-    bx <<= 1;
-    by <<= 1;
-    bsi--;
-    od_smooth_recursive(c, bsize, bstride, bx + 0, by + 0, bsi, w, xdec, ydec,
-     min_bs, quantizer, pli);
-    od_smooth_recursive(c, bsize, bstride, bx + 1, by + 0, bsi, w, xdec, ydec,
-     min_bs, quantizer, pli);
-    od_smooth_recursive(c, bsize, bstride, bx + 0, by + 1, bsi, w, xdec, ydec,
-     min_bs, quantizer, pli);
-    od_smooth_recursive(c, bsize, bstride, bx + 1, by + 1, bsi, w, xdec, ydec,
-     min_bs, quantizer, pli);
-  }
-}
 
 #if defined(TEST)
 # include <stdio.h>
@@ -1763,8 +1639,8 @@ int main(void) {
   for (dims = 4; dims <= 16; dims <<= 1) {
     printf("filter%d:\n", dims);
     for (j = 0; j < dims; j++) {
-      min[j] = mini[j] = 2147483647;
-      max[j] = maxi[j] = -2147483647-1;
+      min[j] = mini[j] = INT_MAX;
+      max[j] = maxi[j] = INT_MIN;
     }
     for (i = 0; i < (1<<dims); i++) {
       od_coeff x[16];

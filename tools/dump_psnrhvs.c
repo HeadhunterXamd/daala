@@ -142,7 +142,7 @@ static double calc_psnrhvs(const unsigned char *_src,int _systride,
       for(i=0;i<8;i++){
         for(j=0;j<8;j++){
           float err;
-          err=fabs(dct_s[i*8+j]-dct_d[i*8+j]);
+          err = abs(dct_s[i*8 + j] - dct_d[i*8 + j]);
           if(i!=0||j!=0)err=err<s_mask/mask[i][j]?0:err-s_mask/mask[i][j];
           ret+=(err*_csf[i][j])*(err*_csf[i][j]);
           pixels++;
@@ -156,7 +156,7 @@ static double calc_psnrhvs(const unsigned char *_src,int _systride,
 
 static void usage(char *_argv[]){
   fprintf(stderr,"Usage: %s [options] <video1> <video2>\n"
-   "    <video1> and <video2> may be either YUV4MPEG or Ogg Theora files.\n\n"
+   "    <video1> and <video2> must be YUV4MPEG files.\n\n"
    "    Options:\n\n"
    "      -f --frame-type Show frame type and QI value for each Theora frame.\n"
    "      -s --summary    Only output the summary line.\n"
@@ -255,6 +255,7 @@ int main(int _argc,char *_argv[]){
     int ret1;
     int ret2;
     int pli;
+    int nplanes;
     ret1=video_input_fetch_frame(&vid1,f1,tag1);
     ret2=video_input_fetch_frame(&vid2,f2,tag2);
     if(ret1==0&&ret2==0)break;
@@ -270,7 +271,8 @@ int main(int _argc,char *_argv[]){
       break;
     }
     /*Okay, we got one frame from each.*/
-    for(pli=0;pli<3;pli++){
+    nplanes = luma_only ? 1 : 3;
+    for(pli=0;pli<nplanes;pli++){
       int xdec;
       int ydec;
       xdec=pli&&!(info1.pixel_fmt&1);

@@ -32,6 +32,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #include <daala/codec.h>
 #include <daala/daaladec.h>
 
+#include <ogg/ogg.h>
+
 #include "SDL.h"
 
 #define ODS_NONE 0
@@ -49,7 +51,7 @@ typedef struct {
   ogg_stream_state os;
   daala_dec_ctx *dctx;
   SDL_Texture *texture;
-  od_img img;
+  daala_image img;
   int width;
   int height;
   int done;
@@ -62,7 +64,22 @@ typedef struct {
   int fullscreen;
   int valid;
   int plane_mask;
+  /*Lookup tables for YUV-to-RGB conversion.*/
+  uint8_t rval_table[256][256];
+  uint8_t gval_table[256][256][256];
+  uint8_t bval_table[256][256];
 } player_example;
+
+static void ogg_to_daala_packet(daala_packet *dp, ogg_packet *op) {
+  dp->packet     = op->packet;
+  dp->bytes      = op->bytes;
+
+  dp->b_o_s      = op->b_o_s;
+  dp->e_o_s      = op->e_o_s;
+
+  dp->granulepos = op->granulepos;
+  dp->packetno   = op->packetno;
+}
 
 enum {
   OD_LUMA_MASK = 1 << 0,
@@ -71,11 +88,13 @@ enum {
   OD_ALL_MASK = OD_LUMA_MASK | OD_CB_MASK | OD_CR_MASK
 };
 
-static void img_to_rgb(SDL_Texture *tex, const od_img *img, int plane_mask);
+static void img_to_rgb(player_example *player, SDL_Texture *tex,
+ const daala_image *img, int plane_mask);
 static int next_plane(int plane_mask);
 static void wait_to_refresh(uint32_t *previous_ticks, uint32_t ms_per_frame);
 
 int player_example_init(player_example *player);
+void build_yuv_to_rgb_table(player_example *player);
 player_example *player_example_create();
 int player_example_clear(player_example *player);
 int player_example_free(player_example *player);
@@ -125,6 +144,7 @@ int player_example_init(player_example *player) {
   player->valid = 0;
   player->od_state = ODS_NONE;
   player->plane_mask = OD_ALL_MASK;
+  build_yuv_to_rgb_table(player);
   return 0;
 }
 
@@ -263,7 +283,7 @@ void player_example_handle_event(player_example *player, SDL_Event *event) {
           player->fullscreen = !player->fullscreen;
           SDL_SetWindowFullscreen(player->screen,
               player->fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-          img_to_rgb(player->texture, &player->img, player->plane_mask);
+          img_to_rgb(player, player->texture, &player->img, player->plane_mask);
           player_example_display_frame(player);
           break;
         }
@@ -302,7 +322,8 @@ int player_example_play(player_example *player) {
   char *buffer;
   int ret;
   ogg_page page;
-  ogg_packet packet;
+  ogg_packet op;
+  daala_packet dp;
   daala_setup_info *dsi;
   uint32_t ms_per_frame;
   uint32_t ticks = 0;
@@ -354,27 +375,31 @@ int player_example_play(player_example *player) {
     }
     ret = ogg_stream_pagein(&player->os, &page);
     if (ret != 0) return -1;
-    while (ogg_stream_packetout(&player->os, &packet) == 1) {
+    while (ogg_stream_packetout(&player->os, &op) == 1) {
+      ogg_to_daala_packet(&dp, &op);
       switch (player->od_state) {
         case ODS_HEADER: {
           ret =
-           daala_decode_header_in(&player->di, &player->dc, &dsi, &packet);
+           daala_decode_header_in(&player->di, &player->dc, &dsi, &dp);
           if (ret < 0) {
-            if (memcmp(packet.packet, "fishead", packet.bytes)) {
+            if (!memcmp(dp.packet, "fishead", dp.bytes)) {
               fprintf(stderr, "Ogg Skeleton streams not supported\n");
+            }
+            else {
+              fprintf(stderr, "Could not decode header. Corrupt stream?\n");
             }
             return -1;
           }
           if (ret != 0) break;
-          player->dctx = daala_decode_alloc(&player->di, dsi);
+          player->dctx = daala_decode_create(&player->di, dsi);
           if (player->dctx == NULL) return -1;
           daala_setup_free(dsi);
           dsi = NULL;
           player->od_state = ODS_DATA;
           if (player->di.timebase_numerator
            && player->di.timebase_denominator) {
-            ms_per_frame = 1000 /
-             (player->di.timebase_numerator / player->di.timebase_denominator);
+            float tb = (float)player->di.timebase_numerator / player->di.timebase_denominator;
+            ms_per_frame = 1000 / tb;
             ticks = SDL_GetTicks();
           }
           break;
@@ -398,8 +423,10 @@ int player_example_play(player_example *player) {
                 player->width, player->height);
             if (player->texture == NULL) return -1;
           }
-          ret = daala_decode_packet_in(player->dctx, &player->img, &packet);
+          ret = daala_decode_packet_in(player->dctx, &dp);
           if (ret != 0) return -1;
+          if (!daala_decode_img_out(player->dctx, &player->img))
+            continue;
           player->valid = 1;
           if ((player->slow) && (!player->step)) {
             SDL_Delay(420);
@@ -417,13 +444,15 @@ int player_example_play(player_example *player) {
           }
           if ((!player->restart) && (!player->done)) {
             wait_to_refresh(&ticks, ms_per_frame);
-            img_to_rgb(player->texture, &player->img, player->plane_mask);
+            img_to_rgb(player, player->texture, &player->img, player->plane_mask);
             player_example_display_frame(player);
           }
           break;
         }
       }
     }
+    /*TODO: How to call daala_decode_img_out() to flush remaining frames in
+       decoder's output buffer (when B frames are used)? */
     if ((player->restart) || (ogg_page_eos(&page))) {
       ret = player_example_daala_stream_clear(player);
       if (ret != 0) return -1;
@@ -461,7 +490,8 @@ int main(int argc, char *argv[]) {
        "r to restart\nl to loop\ns for slow\n. to step\nspace to pause\n"
        "p to switch planes\nq to quit");
       exit(1);
-    } else if ((argc == 2)
+    }
+    else if ((argc == 2)
             && memcmp(argv[1], "--version", 9) == 0
             && strlen(argv[1]) == strlen("--version")) {
       fprintf(stderr, "%s\n", daala_version_string());
@@ -511,7 +541,54 @@ int main(int argc, char *argv[]) {
 #define OD_CLAMP255(x) \
   ((unsigned char)((((x) < 0) - 1) & ((x) | -((x) > 255))))
 
-void img_to_rgb(SDL_Texture *texture, const od_img *img, int plane_mask) {
+unsigned rgb_rval(int64_t yval, int64_t crval) {
+  return OD_CLAMPI(0, (int32_t)OD_DIV_ROUND(
+   2916394880000LL*yval + 4490222169144LL*crval, 9745792000LL), 65535);
+}
+
+unsigned rgb_bval(int64_t yval, int64_t cbval) {
+  return OD_CLAMPI(0, (int32_t)OD_DIV_ROUND(
+   2916394880000LL*yval + 5290866304968LL*cbval, 9745792000LL), 65535);
+}
+
+unsigned rgb_gval(int64_t yval, int64_t cbval, int64_t crval) {
+  return OD_CLAMPI(0, (int32_t)OD_DIV_ROUND(
+   2916394880000LL*yval - 534117096223LL*cbval - 1334761232047LL*crval,
+   9745792000LL), 65535);
+}
+
+void build_yuv_to_rgb_table(player_example *player) {
+  int y;
+  int cr;
+  int cb;
+  int64_t yval;
+  int64_t cbval;
+  int64_t crval;
+  int plane_mask;
+  plane_mask = OD_ALL_MASK;
+  for (y = 0; y < 256; y++) {
+    yval = (plane_mask & OD_LUMA_MASK) * (y - 16)
+           + (((plane_mask & OD_LUMA_MASK) ^ OD_LUMA_MASK) << 7);
+    for (cr = 0; cr < 256; cr++) {
+      crval = ((plane_mask & OD_CR_MASK) >> 2) * (cr - 128);
+      player->rval_table[y][cr] = rgb_rval(yval, crval) >> 8;
+    }
+    for (cb = 0; cb < 256; cb++) {
+      cbval = ((plane_mask & OD_CB_MASK) >> 1) * (cb - 128);
+      player->bval_table[y][cb] = rgb_rval(yval, cbval) >> 8;
+    }
+    for (cb = 0; cb < 256; cb++) {
+      for (cr = 0; cr < 256; cr++) {
+        crval = ((plane_mask & OD_CR_MASK) >> 2) * (cr - 128);
+        cbval = ((plane_mask & OD_CB_MASK) >> 1) * (cb - 128);
+        player->gval_table[y][cb][cr] = rgb_gval(yval, cbval, crval) >> 8;
+      }
+    }
+  }
+}
+
+void img_to_rgb(player_example *player, SDL_Texture *texture,
+ const daala_image *img, int plane_mask) {
   unsigned char *y_row;
   unsigned char *cb_row;
   unsigned char *cr_row;
@@ -543,8 +620,14 @@ void img_to_rgb(SDL_Texture *texture, const od_img *img, int plane_mask) {
     fprintf(stderr, "Couldn't lock video texture!");
     exit(1);
   }
-  width = img->width;
-  height = img->height;
+  /*The texture memory is only allocated for the cropped frame.  The
+    daala_image is rounded up to superblock. */
+  if(SDL_QueryTexture(texture, NULL, NULL, &width, &height)){
+    fprintf(stderr, "Couldn't query video texture!");
+    exit(1);
+  }
+  width = OD_MINI(img->width, width);
+  height = OD_MINI(img->height, height);
   /*Chroma up-sampling is just done with a box filter.
     This is very likely what will actually be used in practice on a real
      display, and also removes one more layer to search in for the source of
@@ -562,21 +645,25 @@ void img_to_rgb(SDL_Texture *texture, const od_img *img, int plane_mask) {
       unsigned rval;
       unsigned gval;
       unsigned bval;
-      yval = (plane_mask & OD_LUMA_MASK) * (*y - 16)
-       + (((plane_mask & OD_LUMA_MASK) ^ OD_LUMA_MASK) << 7);
-      cbval = ((plane_mask & OD_CB_MASK) >> 1) * (*cb - 128);
-      crval = ((plane_mask & OD_CR_MASK) >> 2) * (*cr - 128);
-      /*This is intentionally slow and very accurate.*/
-      rval = OD_CLAMPI(0, (int32_t)OD_DIV_ROUND(
-       2916394880000LL*yval + 4490222169144LL*crval, 9745792000LL), 65535);
-      gval = OD_CLAMPI(0, (int32_t)OD_DIV_ROUND(
-       2916394880000LL*yval - 534117096223LL*cbval - 1334761232047LL*crval,
-       9745792000LL), 65535);
-      bval = OD_CLAMPI(0, (int32_t)OD_DIV_ROUND(
-       2916394880000LL*yval + 5290866304968LL*cbval, 9745792000LL), 65535);
-      *(pixels + pitch*j + i++) = (unsigned char)(bval >> 8);
-      *(pixels + pitch*j + i++) = (unsigned char)(gval >> 8);
-      *(pixels + pitch*j + i++) = (unsigned char)(rval >> 8);
+      if (plane_mask == OD_ALL_MASK) {
+        /*Use precomputed lookup table, only available for OD_ALL_MASK.*/
+        rval = player->rval_table[*y][*cr];
+        gval = player->gval_table[*y][*cb][*cr];
+        bval = player->bval_table[*y][*cb];
+      }
+      else {
+        yval = (plane_mask & OD_LUMA_MASK) * (*y - 16)
+         + (((plane_mask & OD_LUMA_MASK) ^ OD_LUMA_MASK) << 7);
+        cbval = ((plane_mask & OD_CB_MASK) >> 1) * (*cb - 128);
+        crval = ((plane_mask & OD_CR_MASK) >> 2) * (*cr - 128);
+        /*This is intentionally slow and very accurate.*/
+        rval = rgb_rval(yval, crval) >> 8;
+        gval = rgb_gval(yval, cbval, crval) >> 8;
+        bval = rgb_bval(yval, cbval) >> 8;
+      }
+      *(pixels + pitch*j + i++) = (unsigned char)(bval);
+      *(pixels + pitch*j + i++) = (unsigned char)(gval);
+      *(pixels + pitch*j + i++) = (unsigned char)(rval);
       *(pixels + pitch*j + i++) = 0;
       dc = ((y - y_row) & 1) | (1 - xdec);
       y++;

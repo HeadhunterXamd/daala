@@ -9,11 +9,11 @@ lib_LTLIBRARIES = src/libdaalabase.la src/libdaaladec.la src/libdaalaenc.la
 AM_CPPFLAGS = -I$(srcdir)/include
 
 noinst_HEADERS = \
-	src/adapt.h \
 	src/block_size.h \
 	src/block_size_enc.h \
 	src/dct.h \
 	src/decint.h \
+	src/dering.h \
 	src/encint.h \
 	src/entcode.h \
 	src/entdec.h \
@@ -22,23 +22,26 @@ noinst_HEADERS = \
 	src/generic_code.h \
 	src/internal.h \
 	src/intra.h \
-	src/laplace_code.h \
 	src/logging.h \
 	src/mc.h \
 	src/mcenc.h \
 	src/odintrin.h \
 	src/partition.h \
 	src/pvq.h \
-	src/pvq_code.h \
+	src/pvq_decoder.h \
+	src/pvq_encoder.h \
 	src/quantizer.h \
 	src/state.h \
 	src/tf.h \
+	src/util.h \
 	src/zigzag.h \
 	src/accounting.h \
 	src/x86/cpu.h \
 	src/x86/x86enc.h \
 	src/x86/x86dct.h \
-	src/x86/x86int.h
+	src/x86/x86int.h \
+	src/arm/cpu.h \
+	src/arm/armint.h
 
 src_dct_SOURCES = src/dct.c src/internal.c
 if ENABLE_X86ASM
@@ -56,20 +59,23 @@ src_dct_SOURCES += src/x86/avx2dct.c
 %avx2dct.o %avx2dct.lo: CFLAGS += -mavx2
 endif
 endif
+if ENABLE_ARMASM
+src_dct_SOURCES += src/arm/cpu.c
+endif
 
-src_libdaalabase_la_CFLAGS = $(OGG_CFLAGS)
-src_libdaalabase_la_LIBADD = $(OGG_LIBS) $(LIBM)
+
+src_libdaalabase_la_LIBADD = $(LIBM)
 if DUMP_IMAGES
   src_libdaalabase_la_LIBADD += $(PNG_LIBS)
 endif
 src_libdaalabase_la_LDFLAGS = -no-undefined \
  -version-info @OD_LT_CURRENT@:@OD_LT_REVISION@:@OD_LT_AGE@
-src_libdaalabase_la_LDFLAGS += 
+src_libdaalabase_la_LDFLAGS +=
 src_libdaalabase_la_SOURCES = \
 	src/accounting.c \
-	src/adapt.c \
 	src/entcode.c \
 	src/entdec.c \
+	src/dering.c \
 	src/filter.c \
 	src/generic_code.c \
 	src/generic_decoder.c \
@@ -81,12 +87,12 @@ src_libdaalabase_la_SOURCES = \
 	src/mc.c \
 	src/partition.c \
 	src/pvq.c \
-	src/pvq_code.c \
 	src/pvq_decoder.c \
 	src/quantizer.c \
 	src/state.c \
 	src/switch_table.c \
 	src/tf.c \
+	src/util.c \
 	src/zigzag4.c \
 	src/zigzag8.c \
 	src/zigzag16.c \
@@ -95,20 +101,20 @@ src_libdaalabase_la_SOURCES = \
 	$(src_dct_SOURCES)
 if ENABLE_X86ASM
 src_libdaalabase_la_SOURCES += \
+	src/x86/sse2dering.c \
 	src/x86/sse2mc.c \
+	src/x86/sse2util.c \
 	src/x86/x86state.c
 endif
 
-src_libdaaladec_la_CFLAGS = $(OGG_CFLAGS)
-src_libdaaladec_la_LIBADD = src/libdaalabase.la $(OGG_LIBS) $(LIBM)
+src_libdaaladec_la_LIBADD = src/libdaalabase.la $(LIBM)
 src_libdaaladec_la_LDFLAGS = -no-undefined \
  -version-info @OD_LT_CURRENT@:@OD_LT_REVISION@:@OD_LT_AGE@
 src_libdaaladec_la_SOURCES = \
 	src/decode.c \
 	src/infodec.c
 
-src_libdaalaenc_la_CFLAGS = $(OGG_CFLAGS)
-src_libdaalaenc_la_LIBADD = src/libdaalabase.la $(OGG_LIBS) $(LIBM)
+src_libdaalaenc_la_LIBADD = src/libdaalabase.la $(LIBM)
 if ENCODER_CHECK
   src_libdaalaenc_la_LIBADD += src/libdaaladec.la
 endif
@@ -122,18 +128,29 @@ src_libdaalaenc_la_SOURCES = \
 	src/infoenc.c \
 	src/laplace_encoder.c \
 	src/mcenc.c \
-	src/pvq_encoder.c
+	src/pvq_encoder.c \
+	src/rate.c
 if ENABLE_X86ASM
 src_libdaalaenc_la_SOURCES += \
         src/x86/x86enc.c \
         src/x86/x86mcenc.c
+if ENABLE_SSE2_INTRINSICS
+src_libdaalaenc_la_SOURCES += \
+        src/x86/sse2mcenc.c
+%sse2mcenc.o %sse2mcenc.lo: CFLAGS += -msse2
+endif
 endif
 
 # Example programs
 
-noinst_PROGRAMS = \
+noinst_PROGRAMS =
+
+if ENABLE_EXAMPLES
+  noinst_PROGRAMS += \
 	examples/dump_video \
 	examples/encoder_example
+endif
+
 
 if ENABLE_PLAYER_EXAMPLE
   noinst_PROGRAMS += examples/player_example
@@ -193,6 +210,8 @@ tools_TARGETS = \
 	tools/trans_gain \
 	tools/gen_cdf \
 	tools/compute_basis \
+	tools/compute_haar_basis \
+	tools/cos_search \
 	tools/gen_laplace_tables \
 	tools/daalainfo \
 	tools/dump_ssim \
@@ -203,7 +222,8 @@ tools_TARGETS = \
 	tools/yuv2yuv4mpeg \
 	tools/dump_psnr \
 	tools/vq_train \
-	tools/draw_zigzags
+	tools/draw_zigzags \
+	tools/dump_msssim
 
 noinst_HEADERS += \
 	tools/cholesky.h \
@@ -256,6 +276,14 @@ tools_dump_ssim_SOURCES = \
 tools_dump_ssim_CFLAGS = $(OGG_CFLAGS)
 tools_dump_ssim_LDADD = $(OGG_LIBS) $(LIBM)
 
+# dump_msssim
+tools_dump_msssim_SOURCES = \
+	tools/vidinput.c \
+	tools/y4m_input.c \
+	tools/dump_msssim.c
+tools_dump_msssim_CFLAGS = $(OGG_CFLAGS)
+tools_dump_msssim_LDADD = $(OGG_LIBS) $(LIBM)
+
 # dump_fastssim
 tools_dump_fastssim_SOURCES = \
 	tools/vidinput.c \
@@ -279,11 +307,7 @@ tools_block_size_analysis_SOURCES = \
 	tools/vidinput.c \
 	tools/y4m_input.c \
 	$(src_dct_SOURCES) \
-	src/generic_encoder.c \
-	src/generic_code.c \
-	src/laplace_encoder.c \
 	src/logging.c \
-	src/laplace_tables.c \
 	src/entcode.c \
 	src/entenc.c \
 	src/filter.c \
@@ -310,19 +334,30 @@ tools_downsample_LDADD = $(THEORA_LIBS) $(OGG_LIBS) $(PNG_LIBS)
 # upsample
 tools_upsample_SOURCES = \
 	$(src_dct_SOURCES) \
+	src/dering.c \
+	src/filter.c \
 	src/generic_code.c \
 	src/switch_table.c \
 	src/logging.c \
 	src/info.c \
 	src/mc.c \
+	src/partition.c \
 	src/pvq.c \
 	src/state.c \
+	src/util.c \
+	src/zigzag4.c \
+	src/zigzag8.c \
+	src/zigzag16.c \
+	src/zigzag32.c \
+	src/zigzag64.c \
 	tools/vidinput.c \
 	tools/y4m_input.c \
 	tools/upsample.c
 if ENABLE_X86ASM
 tools_upsample_SOURCES += \
+	src/x86/sse2dering.c \
 	src/x86/sse2mc.c \
+	src/x86/sse2util.c \
 	src/x86/x86state.c
 endif
 tools_upsample_CFLAGS = $(THEORA_CFLAGS) $(OGG_CFLAGS) $(PNG_CFLAGS)
@@ -395,6 +430,20 @@ tools_compute_basis_SOURCES = \
 tools_compute_basis_CFLAGS = $(OGG_CFLAGS)
 tools_compute_basis_LDADD = $(OGG_LIBS) $(LIBM)
 
+# compute_haar_basis
+tools_compute_haar_basis_SOURCES = \
+	tools/compute_haar_basis.c \
+	src/dct.c \
+	src/filter.c \
+	src/internal.c
+tools_compute_haar_basis_CFLAGS = $(OGG_CFLAGS)
+tools_compute_haar_basis_LDADD = $(OGG_LIBS) $(LIBM)
+
+# cos_search
+tools_cos_search_SOURCES = \
+	tools/cos_search.c
+tools_cos_search_LDADD = $(LIBM)
+
 # gen_laplace_tables
 tools_gen_laplace_tables_SOURCES = \
 	tools/gen_laplace_tables.c
@@ -453,7 +502,6 @@ endif # ENABLE_TOOLS
 if ENABLE_UNIT_TESTS
 noinst_PROGRAMS += \
 	src/tests/dcttest \
-	src/tests/test_32x32 \
 	src/tests/ectest \
 	src/tests/test_coef_coder \
 	src/tests/logging_test \
@@ -462,7 +510,6 @@ noinst_PROGRAMS += \
 
 TESTS = \
 	src/tests/dcttest \
-	src/tests/test_32x32 \
 	src/tests/ectest \
 	src/tests/test_coef_coder \
 	src/tests/logging_test \
@@ -473,10 +520,6 @@ src_tests_dcttest_SOURCES = $(src_dct_SOURCES) src/filter.c
 src_tests_dcttest_CFLAGS = $(OGG_CFLAGS) \
  -DOD_DCT_CHECK_OVERFLOW -DOD_DCT_TEST -DOD_ENABLE_ASSERTIONS
 src_tests_dcttest_LDADD = $(LIBM)
-
-src_tests_test_32x32_SOURCES = src/tests/test_32x32.c
-src_tests_test_32x32_CFLAGS = $(OGG_CFLAGS) -D_GNU_SOURCE
-src_tests_test_32x32_LDADD = $(LIBM)
 
 src_tests_ectest_SOURCES = src/tests/ectest.c
 src_tests_ectest_CFLAGS = $(OGG_CFLAGS)

@@ -69,9 +69,6 @@ void od_apply_prefilter_frame(od_coeff *c, int w, int nhsb, int nvsb,
 void od_apply_postfilter_frame(od_coeff *c, int w, int nhsb, int nvsb,
  const unsigned char *bsize, int bstride, int dec);
 
-/* Largest filter size used is 8-point. */
-#define OD_MAX_FILT_SIZE (1)
-
 /* The length in pixel of the lapping of a block is
    4 << OD_FILT_SIZE(ln, xdec). Right now, we use 4-point lapping for
    all block sizes and for all planes.
@@ -80,15 +77,10 @@ void od_apply_postfilter_frame(od_coeff *c, int w, int nhsb, int nvsb,
 #define OD_FILT_SIZE(ln, xdec) (0)
 
 extern const int OD_FILT_SIZE[OD_NBSIZES];
-void od_clpf(od_coeff *y, int ystride, od_coeff *x, int xstride, int ln,
- int sbx, int sby, int nhsb, int nvsb);
-void od_bilinear_smooth(od_coeff *x, int ln, int stride, int q, int pli);
-void od_smooth_recursive(od_coeff *c, unsigned char *bsize, int bstride,
- int bx, int by, int bsi, int w, int xdec, int ydec, int min_bs,
-  int quantizer, int pli);
-void od_prefilter_split(od_coeff *c0, int stride, int bs, int f);
+void od_prefilter_split(od_coeff *c0, int stride, int bs, int f, int hfilter,
+ int vfilter);
 void od_postfilter_split(od_coeff *c0, int stride, int bs, int f, int q,
- unsigned char *skip, int skip_stride);
+ unsigned char *skip, int skip_stride, int hfilter, int vfilter);
 void od_apply_prefilter_frame_sbs(od_coeff *c, int stride, int nhsb, int nvsb,
  int xdec, int ydec);
 void od_apply_postfilter_frame_sbs(od_coeff *c, int stride, int nhsb, int nvsb,
@@ -100,11 +92,11 @@ void od_apply_filter_sb_cols(od_coeff *c, int stride, int nhsb, int nvsb,
 void od_apply_filter_hsplit(od_coeff *c0, int stride, int inv, int bs, int f);
 void od_apply_filter_vsplit(od_coeff *c0, int stride, int inv, int bs, int f);
 
-# if defined(OD_DCT_TEST) && defined(OD_DCT_CHECK_OVERFLOW)
+# if defined(OD_DCT_CHECK_OVERFLOW)
 #  include <stdio.h>
 
-extern int od_dct_check_min[];
-extern int od_dct_check_max[];
+extern od_coeff od_dct_check_min[];
+extern od_coeff od_dct_check_max[];
 
 #  define OD_DCT_OVERFLOW_CHECK(val, scale, offset, idx) \
   do { \

@@ -27,7 +27,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #endif
 
 #include "entdec.h"
-#include "accounting.h"
+#if OD_ACCOUNTING
+# include "accounting.h"
+#endif
 
 /*A range decoder.
   This is an entropy decoder based upon \cite{Mar79}, which is itself a
@@ -85,7 +87,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
   }*/
 
 #if OD_ACCOUNTING
-# define OD_PROCESS_ACCOUNTING(dec, str) od_process_accounting(dec, str)
 # define od_ec_dec_normalize(dec, dif, rng, ret, str) od_ec_dec_normalize_(dec, dif, rng, ret, str)
 static void od_process_accounting(od_ec_dec *dec, char *str) {
   if (dec->acct != NULL) {
@@ -97,7 +98,6 @@ static void od_process_accounting(od_ec_dec *dec, char *str) {
   }
 }
 #else
-# define OD_PROCESS_ACCOUNTING(dec, str) do {} while(0)
 # define od_ec_dec_normalize(dec, dif, rng, ret, str) od_ec_dec_normalize_(dec, dif, rng, ret)
 #endif
 
@@ -148,7 +148,9 @@ static int od_ec_dec_normalize_(od_ec_dec *dec,
   dec->dif = dif << d;
   dec->rng = rng << d;
   if (dec->cnt < 0) od_ec_dec_refill(dec);
-  OD_PROCESS_ACCOUNTING(dec, acc_str);
+#if OD_ACCOUNTING
+  od_process_accounting(dec, acc_str);
+#endif
   return ret;
 }
 
@@ -216,7 +218,12 @@ int od_ec_decode_bool_(od_ec_dec *dec, unsigned fz, unsigned ft OD_ACC_STR) {
   return od_ec_dec_normalize(dec, dif, r, ret, acc_str);
 }
 
-/*Equivalent to od_ec_decode_bool() with ft == 32768.
+/*Decode a bit that has an fz probability of being a zero in Q15.
+  This is a simpler, lower overhead version of od_ec_decode_bool() for use when
+   ft == 32768.
+  To be decoded properly by this function, symbols cannot have been encoded by
+   od_ec_encode(), but must have been encoded with one of the equivalent _q15()
+   or _dyadic() functions instead.
   fz: The probability that the bit is zero, scaled by 32768.
   Return: The value decoded (0 or 1).*/
 int od_ec_decode_bool_q15_(od_ec_dec *dec, unsigned fz OD_ACC_STR) {
@@ -231,17 +238,7 @@ int od_ec_decode_bool_q15_(od_ec_dec *dec, unsigned fz OD_ACC_STR) {
   r = dec->rng;
   OD_ASSERT(dif >> (OD_EC_WINDOW_SIZE - 16) < r);
   OD_ASSERT(32768U <= r);
-#if OD_EC_REDUCED_OVERHEAD
-  {
-    unsigned d;
-    unsigned e;
-    d = r - 32768U;
-    e = OD_SUBSATU(2*d, 32768U);
-    v = fz + OD_MINI(fz, e) + OD_MINI(OD_SUBSATU(fz, e) >> 1, d);
-  }
-#else
-  v = fz + OD_MINI(fz, r - 32768U);
-#endif
+  v = fz * (uint32_t)r >> 15;
   vw = (od_ec_window)v << (OD_EC_WINDOW_SIZE - 16);
   ret = dif >= vw;
   if (ret) dif -= vw;
@@ -322,61 +319,6 @@ int od_ec_decode_cdf_(od_ec_dec *dec, const uint16_t *cdf, int nsyms OD_ACC_STR)
   cdf: The CDF, such that symbol s falls in the range
         [s > 0 ? cdf[s - 1] : 0, cdf[s]).
        The values must be monotonically non-increasing, and cdf[nsyms - 1]
-        must be 32768.
-  nsyms: The number of symbols in the alphabet.
-         This should be at most 16.
-  Return: The decoded symbol s.*/
-int od_ec_decode_cdf_q15_(od_ec_dec *dec, const uint16_t *cdf, int nsyms OD_ACC_STR) {
-  od_ec_window dif;
-  unsigned r;
-  unsigned c;
-  unsigned d;
-#if OD_EC_REDUCED_OVERHEAD
-  unsigned e;
-#endif
-  unsigned u;
-  unsigned v;
-  unsigned q;
-  unsigned fl;
-  unsigned fh;
-  int ret;
-  (void)nsyms;
-  dif = dec->dif;
-  r = dec->rng;
-  OD_ASSERT(dif >> (OD_EC_WINDOW_SIZE - 16) < r);
-  OD_ASSERT(nsyms > 0);
-  OD_ASSERT(cdf[nsyms - 1] == 32768U);
-  OD_ASSERT(32768U <= r);
-  d = r - 32768U;
-  OD_ASSERT(d < 32768U);
-  c = (unsigned)(dif >> (OD_EC_WINDOW_SIZE - 16));
-  q = OD_MAXI((int)(c >> 1), (int)(c - d));
-#if OD_EC_REDUCED_OVERHEAD
-  e = OD_SUBSATU(2*d, 32768U);
-  /*TODO: See TODO above.*/
-  q = OD_MAXI((int)q, (int)((2*(int32_t)c + 1 - (int32_t)e)/3));
-#endif
-  OD_ASSERT(q < 32768U);
-  fl = 0;
-  ret = 0;
-  for (fh = cdf[ret]; fh <= q; fh = cdf[++ret]) fl = fh;
-  OD_ASSERT(fh <= 32768U);
-#if OD_EC_REDUCED_OVERHEAD
-  u = fl + OD_MINI(fl, e) + OD_MINI(OD_SUBSATU(fl, e) >> 1, d);
-  v = fh + OD_MINI(fh, e) + OD_MINI(OD_SUBSATU(fh, e) >> 1, d);
-#else
-  u = fl + OD_MINI(fl, d);
-  v = fh + OD_MINI(fh, d);
-#endif
-  r = v - u;
-  dif -= (od_ec_window)u << (OD_EC_WINDOW_SIZE - 16);
-  return od_ec_dec_normalize(dec, dif, r, ret, acc_str);
-}
-
-/*Decodes a symbol given a cumulative distribution function (CDF) table.
-  cdf: The CDF, such that symbol s falls in the range
-        [s > 0 ? cdf[s - 1] : 0, cdf[s]).
-       The values must be monotonically non-increasing, and cdf[nsyms - 1]
        must be at least 2, and no more than 32768.
   nsyms: The number of symbols in the alphabet.
          This should be at most 16.
@@ -441,7 +383,13 @@ int od_ec_decode_cdf_unscaled_(od_ec_dec *dec,
   return od_ec_dec_normalize(dec, dif, r, ret, acc_str);
 }
 
-/*Decodes a symbol given a cumulative distribution function (CDF) table.
+/*Decodes a symbol given a cumulative distribution function (CDF) table that
+   sums to a power of two.
+  This is a simpler, lower overhead version of od_ec_decode_cdf() for use when
+   cdf[nsyms - 1] is a power of two.
+  To be decoded properly by this function, symbols cannot have been encoded by
+   od_ec_encode(), but must have been encoded with one of the equivalent _q15()
+   functions instead.
   cdf: The CDF, such that symbol s falls in the range
         [s > 0 ? cdf[s - 1] : 0, cdf[s]).
        The values must be monotonically non-increasing, and cdf[nsyms - 1]
@@ -456,52 +404,46 @@ int od_ec_decode_cdf_unscaled_dyadic_(od_ec_dec *dec,
   od_ec_window dif;
   unsigned r;
   unsigned c;
-  unsigned d;
-#if OD_EC_REDUCED_OVERHEAD
-  unsigned e;
-#endif
-  int s;
   unsigned u;
   unsigned v;
-  unsigned q;
-  unsigned fl;
-  unsigned fh;
   int ret;
-  (void)nsyms;
+  OD_UNUSED(nsyms);
   dif = dec->dif;
   r = dec->rng;
   OD_ASSERT(dif >> (OD_EC_WINDOW_SIZE - 16) < r);
   OD_ASSERT(ftb <= 15);
   OD_ASSERT(cdf[nsyms - 1] == 1U << ftb);
-  s = 15 - ftb;
   OD_ASSERT(32768U <= r);
-  d = r - 32768U;
-  OD_ASSERT(d < 32768U);
   c = (unsigned)(dif >> (OD_EC_WINDOW_SIZE - 16));
-  q = OD_MAXI((int)(c >> 1), (int)(c - d));
-#if OD_EC_REDUCED_OVERHEAD
-  e = OD_SUBSATU(2*d, 32768U);
-  /*TODO: See TODO above.*/
-  q = OD_MAXI((int)q, (int)((2*(int32_t)c + 1 - (int32_t)e)/3));
-#endif
-  q >>= s;
-  OD_ASSERT(q < 1U << ftb);
-  fl = 0;
-  ret = 0;
-  for (fh = cdf[ret]; fh <= q; fh = cdf[++ret]) fl = fh;
-  OD_ASSERT(fh <= 1U << ftb);
-  fl <<= s;
-  fh <<= s;
-#if OD_EC_REDUCED_OVERHEAD
-  u = fl + OD_MINI(fl, e) + OD_MINI(OD_SUBSATU(fl, e) >> 1, d);
-  v = fh + OD_MINI(fh, e) + OD_MINI(OD_SUBSATU(fh, e) >> 1, d);
-#else
-  u = fl + OD_MINI(fl, d);
-  v = fh + OD_MINI(fh, d);
-#endif
+  v = 0;
+  ret = -1;
+  do {
+    u = v;
+    v = cdf[++ret]*(uint32_t)r >> ftb;
+  }
+  while (v <= c);
+  OD_ASSERT(v <= r);
   r = v - u;
   dif -= (od_ec_window)u << (OD_EC_WINDOW_SIZE - 16);
   return od_ec_dec_normalize(dec, dif, r, ret, acc_str);
+}
+
+/*Decodes a symbol given a cumulative distribution function (CDF) table in Q15.
+  This is a simpler, lower overhead version of od_ec_decode_cdf() for use when
+   cdf[nsyms - 1] == 32768.
+  To be decoded properly by this function, symbols cannot have been encoded by
+   od_ec_encode(), but must have been encoded with one of the equivalent _q15()
+   or dyadic() functions instead.
+  cdf: The CDF, such that symbol s falls in the range
+        [s > 0 ? cdf[s - 1] : 0, cdf[s]).
+       The values must be monotonically non-increasing, and cdf[nsyms - 1]
+        must be 32768.
+  nsyms: The number of symbols in the alphabet.
+         This should be at most 16.
+  Return: The decoded symbol s.*/
+int od_ec_decode_cdf_q15_(od_ec_dec *dec,
+ const uint16_t *cdf, int nsyms OD_ACC_STR) {
+  return od_ec_decode_cdf_unscaled_dyadic(dec, cdf, nsyms, 15, acc_str);
 }
 
 /*Extracts a raw unsigned integer with a non-power-of-2 range from the stream.
@@ -563,7 +505,9 @@ uint32_t od_ec_dec_bits_(od_ec_dec *dec, unsigned ftb OD_ACC_STR) {
   available -= ftb;
   dec->end_window = window;
   dec->nend_bits = available;
-  OD_PROCESS_ACCOUNTING(dec, acc_str);
+#if OD_ACCOUNTING
+  od_process_accounting(dec, acc_str);
+#endif
   return ret;
 }
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-CODECS="<daala|vp8|vp9|x264|x265|libjpeg|mozjpeg|theora>"
+CODECS="<daala|av1|vp8|vp9|vp10|x264|x265|libjpeg|mozjpeg|theora|webp|bpg>"
 
 if [ $# == 0 ]; then
   echo "usage: DAALA_ROOT=<build_dir> $0 $CODECS *.y4m"
@@ -51,7 +51,35 @@ case $CODEC in
 
     export RD_COLLECT_SUB=$(dirname "$0")/rd_collect_daala.sh
     ;;
-  vp8 | vp9)
+  av1)
+    if [ -z $AOM_ROOT ] || [ ! -d $AOM_ROOT ]; then
+      echo "Please set AOM_ROOT to the location of your aom git clone"
+      exit 1
+    fi
+
+    if [ -z "$AOMENC" ]; then
+      export AOMENC=$AOM_ROOT/aomenc
+    fi
+
+    if [ -z "$AOMDEC" ]; then
+      export AOMDEC=$AOM_ROOT/aomdec
+    fi
+
+    if [ ! -x "$AOMENC" ]; then
+      echo "Executable not found AOMENC=$AOMENC"
+      echo "Do you have the right AOM_ROOT=$AOM_ROOT"
+      exit 1
+    fi
+
+    if [ ! -x "$AOMDEC" ]; then
+      echo "Executable not found AOMDEC=$AOMDEC"
+      echo "Do you have the right AOM_ROOT=$AOM_ROOT"
+      exit 1
+    fi
+
+    export RD_COLLECT_SUB=$(dirname $0)/rd_collect_aom.sh
+    ;;
+  vp8 | vp9 | vp10)
     if [ -z $LIBVPX_ROOT ] || [ ! -d $LIBVPX_ROOT ]; then
       echo "Please set LIBVPX_ROOT to the location of your libvpx git clone"
       exit 1
@@ -194,6 +222,63 @@ case $CODEC in
 
     export RD_COLLECT_SUB=$(dirname $0)/rd_collect_theora.sh
     ;;
+  webp)
+    if [ -z $WEBP_ROOT ] || [ ! -d $WEBP_ROOT ]; then
+      echo "Please set WEBP_ROOT to the location of your webp checkout"
+      exit 1
+    fi
+
+    if [ -z "$CWEBP" ]; then
+      export CWEBP=$WEBP_ROOT/examples/cwebp
+    fi
+
+    if [ -z "$DWEBP" ]; then
+      export DWEBP=$WEBP_ROOT/examples/dwebp
+    fi
+
+    if [ ! -x "$CWEBP" ]; then
+      echo "Executable not found CWEBP=$CWEBP"
+      echo "Do you have the right WEBP_ROOT=$WEBP_ROOT"
+      exit 1
+    fi
+
+    if [ ! -x "$DWEBP" ]; then
+      echo "Executable not found DWEBP=$DWEBP"
+      echo "Do you have the right WEBP_ROOT=$WEBP_ROOT"
+      exit 1
+    fi
+
+    export RD_COLLECT_SUB=$(dirname $0)/rd_collect_webp.sh
+    ;;
+  bpg)
+    if [ -z $BPG_ROOT ] || [ ! -d $BPG_ROOT ]; then
+      echo "Please set BPG_ROOT to the location of your libbpg checkout"
+      exit 1
+    fi
+
+    if [ -z "$BPGENC" ]; then
+      export BPGENC=$BPG_ROOT/bpgenc
+    fi
+
+    if [ -z "$BPGDEC" ]; then
+      export BPGDEC=$BPG_ROOT/bpgdec
+    fi
+
+    if [ ! -x "$BPGENC" ]; then
+      echo "Executable not found BPGENC=$BPGENC"
+      echo "Do you have the right BPG_ROOT=$BPG_ROOT"
+      exit 1
+    fi
+
+    if [ ! -x "$BPGDEC" ]; then
+      echo "Executable not found BPGDEC=$BPGDEC"
+      echo "Do you have the right BPG_ROOT=$BPG_ROOT"
+      exit 1
+    fi
+
+    export CORES=1
+    export RD_COLLECT_SUB=$(dirname $0)/rd_collect_bpg.sh
+    ;;
   *)
     echo "Unknown codec: $CODEC"
     exit 1
@@ -215,6 +300,14 @@ if [ -z "$YUV2YUV4MPEG" ]; then
   export YUV2YUV4MPEG=$DAALA_ROOT/tools/yuv2yuv4mpeg
 fi
 
+if [ -z "$Y4M2PNG" ]; then
+  export Y4M2PNG=$DAALA_ROOT/tools/y4m2png
+fi
+
+if [ -z "$PNG2Y4M" ]; then
+  export PNG2Y4M=$DAALA_ROOT/tools/png2y4m
+fi
+
 if [ -z "$DUMP_PSNR" ]; then
   export DUMP_PSNR=$DAALA_ROOT/tools/dump_psnr
 fi
@@ -233,6 +326,18 @@ fi
 
 if [ ! -x "$YUV2YUV4MPEG" ]; then
   echo "Executable not found YUV2YUV4MPEG=$YUV2YUV4MPEG"
+  echo "Do you have the right DAALA_ROOT=$DAALA_ROOT"
+  exit 1
+fi
+
+if [ ! -x "$Y4M2PNG" ]; then
+  echo "Executable not found Y4M2PNG=$Y4M2PNG"
+  echo "Do you have the right DAALA_ROOT=$DAALA_ROOT"
+  exit 1
+fi
+
+if [ ! -x "$PNG2Y4M" ]; then
+  echo "Executable not found PNG2Y4M=$PNG2Y4M"
   echo "Do you have the right DAALA_ROOT=$DAALA_ROOT"
   exit 1
 fi

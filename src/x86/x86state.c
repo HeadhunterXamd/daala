@@ -39,18 +39,40 @@ static void od_restore_fpu_mmx(void){
 void od_state_opt_vtbl_init_x86(od_state *_state){
   od_state_opt_vtbl_init_c(_state);
   _state->cpu_flags=od_cpu_flags_get();
-  if (_state->cpu_flags&OD_CPU_X86_SSE2) {
-#if defined(OD_GCC_INLINE_ASSEMBLY)
-    _state->opt_vtbl.mc_blend_full8 = od_mc_blend_full8_sse2;
-    _state->opt_vtbl.mc_blend_full_split8 = od_mc_blend_full_split8_sse2;
-#endif
-
+  if (_state->info.full_precision_references) {
+    /*No 16 bit assembly as yet, but it will go here.*/
+    if (_state->cpu_flags&OD_CPU_X86_SSE2) {
 #if defined(OD_SSE2_INTRINSICS)
-    _state->opt_vtbl.mc_predict1fmv8 = od_mc_predict1fmv8_sse2;
+      _state->opt_vtbl.mc_predict1fmv = od_mc_predict1fmv16_sse2;
+#endif
+    }
+  }
+  else {
+    /*8 bit assembly for those functions that work directly on 8-bit
+      daala_image and reference buffers.*/
+    if (_state->cpu_flags&OD_CPU_X86_SSE2) {
+#if defined(OD_GCC_INLINE_ASSEMBLY)
+      _state->opt_vtbl.mc_blend_full = od_mc_blend_full8_sse2;
+      _state->opt_vtbl.mc_blend_full_split = od_mc_blend_full_split8_sse2;
+#endif
+#if defined(OD_SSE2_INTRINSICS)
+      _state->opt_vtbl.mc_predict1fmv = od_mc_predict1fmv8_sse2;
+      _state->opt_vtbl.od_copy_nxn[4] = od_copy_16x16_8_sse2;
+      _state->opt_vtbl.od_copy_nxn[5] = od_copy_32x32_8_sse2;
+      _state->opt_vtbl.od_copy_nxn[6] = od_copy_64x64_8_sse2;
+#endif
+    }
+  }
+  if (_state->cpu_flags&OD_CPU_X86_SSE2) {
+#if defined(OD_SSE2_INTRINSICS)
     _state->opt_vtbl.fdct_2d[0] = od_bin_fdct4x4_sse2;
     _state->opt_vtbl.idct_2d[0] = od_bin_idct4x4_sse2;
     _state->opt_vtbl.fdct_2d[1] = od_bin_fdct8x8_sse2;
     _state->opt_vtbl.idct_2d[1] = od_bin_idct8x8_sse2;
+    OD_COPY(_state->opt_vtbl.dering.filter_dering_direction,
+     OD_DERING_DIRECTION_SSE2, OD_DERINGSIZES);
+    OD_COPY(_state->opt_vtbl.dering.filter_dering_orthogonal,
+     OD_DERING_ORTHOGONAL_SSE2, OD_DERINGSIZES);
 #endif
 #if defined(OD_SSE41_INTRINSICS)
     if (_state->cpu_flags&OD_CPU_X86_SSE4_1) {

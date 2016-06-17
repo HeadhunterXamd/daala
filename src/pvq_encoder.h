@@ -1,5 +1,5 @@
 /*Daala video codec
-Copyright (c) 2013 Daala project contributors.  All rights reserved.
+Copyright (c) 2012 Daala project contributors.  All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -22,50 +22,30 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 
-#if !defined(_adapt_H)
-# define _adapt_H (1)
+#if !defined(_pvq_encoder_H)
+# define _pvq_encoder_H (1)
+# include "internal.h"
+# include "filter.h"
+# include "pvq.h"
+# include "entenc.h"
+# include "encint.h"
 
-# include "../include/daala/daala_integer.h"
+void od_encode_band_pvq_splits(od_ec_enc *ec, od_pvq_codeword_ctx *adapt,
+ const int *y, int n, int k, int level);
 
-# define OD_NSB_ADAPT_CTXS (4)
+void laplace_encode_special(od_ec_enc *enc, int x, unsigned decay, int max);
+void laplace_encode(od_ec_enc *enc, int x, int ex_q8, int k);
+void laplace_encode_vector(od_ec_enc *enc, const od_coeff *y, int n, int k,
+                                  int32_t *curr, const int32_t *means);
 
-# define OD_ADAPT_K_Q8        0
-# define OD_ADAPT_SUM_EX_Q8   1
-# define OD_ADAPT_COUNT_Q8    2
-# define OD_ADAPT_COUNT_EX_Q8 3
+#if OD_SIGNAL_Q_SCALING
+void od_encode_quantizer_scaling(daala_enc_ctx *enc, int q_scaling, int bx,
+ int by, int skip);
+#endif
 
-# define OD_ADAPT_NO_VALUE (-2147483647-1)
-# define OD_NADAPT_CTXS_MAX (OD_NSB_ADAPT_CTXS)
-
-typedef struct {
-  int32_t curr;
-  int32_t mean;
-} od_adapt2d_data;
-
-typedef struct {
-  od_adapt2d_data *data;
-  /*Adaptation rates and initial values.*/
-  const int32_t *params;
-  /*Number of values in a row.*/
-  int nhv;
-  /*Number of contexts being modeled.*/
-  int nctx;
-} od_adapt2d_ctx;
-
-void od_adapt2d_init(od_adapt2d_ctx *ctx, int nhv,
- int nctx, const int32_t *params);
-void od_adapt2d_clear(od_adapt2d_ctx *ctx);
-
-void od_adapt2d_row_init(od_adapt2d_ctx *ctx);
-
-void od_adapt2d_hmean_init(const od_adapt2d_ctx *ctx, int32_t *hmean);
-
-void od_adapt2d_get_stats(const od_adapt2d_ctx *ctx, int xpos,
- const int32_t *hmean, int32_t *means);
-
-void od_adapt2d_forward(od_adapt2d_ctx *ctx, int xpos, int32_t *hmean,
- const int32_t *curr);
-
-void od_adapt2d_row_backward(od_adapt2d_ctx *ctx);
+int od_pvq_encode(daala_enc_ctx *enc, od_coeff *ref, const od_coeff *in,
+ od_coeff *out, int q0, int pli, int bs, const double *beta, int robust,
+ int is_keyframe, int q_scaling, int bx, int by, const int16_t *qm,
+ const int16_t *qm_inv);
 
 #endif

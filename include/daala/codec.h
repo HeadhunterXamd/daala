@@ -124,8 +124,8 @@ extern "C" {
 /**The maximum number of color planes allowed in a single frame.*/
 # define OD_NPLANES_MAX (4)
 
-typedef struct od_img_plane od_img_plane;
-typedef struct od_img od_img;
+typedef struct daala_image_plane daala_image_plane;
+typedef struct daala_image daala_image;
 typedef struct daala_plane_info daala_plane_info;
 typedef struct daala_info daala_info;
 typedef struct daala_comment daala_comment;
@@ -143,25 +143,38 @@ const char *daala_version_string(void);
 int daala_log_init(void);
 
 /** Representation of a single component within an image or frame. */
-struct od_img_plane {
+struct daala_image_plane {
+  /** Image data is stored as an unsigned octet type whether it's
+      actually 8 bit or a multi-byte depth. */
   unsigned char *data;
-  /** The decimation factor in x direction. Pixels are reduced by a factor of
-      2^xdec so 0 is none, 1 is decimated by a factor of 2. ( YUV420 will
-      have xdec of 1 and ydec also of 1. YUV444 will have xdec and ydec set to
-      zero ). */
+  /** The decimation factor in the x and y direction. Pixels are reduced
+      by a factor of 2^xdec so 0 is none, 1 is decimated by a factor of 2.
+      ( YUV420 will  have xdec of 1 and ydec also of 1. YUV444 will have
+      xdec and ydec set to zero ). */
   unsigned char xdec;
   unsigned char ydec;
-  /** Distance in memory between two pixels horizontally next to each other in
-      (is always 1 in encoder). */
+  /** Distance in memory between two pixels horizontally next to each other.
+      The value is in bytes regardless of the 'actual' underlying depth
+      (either unsigned bytes for 8 bit video or unsigned 16 bit shorts for
+      high-depth video). The xstride may be larger than the actual data
+      width calculated from the bitdepth; this implies packed rather than
+      planar data. */
   int xstride;
-  /** Distance in memory between two pixels vertically next to each other. */
+  /** Distance in memory between two pixels vertically next to each other.
+      As with xstride, this value is always in bytes. */
   int ystride;
+  /** 8 for 'normal' video precision; data is unsigned bytes centered on 128.
+      Greater-than-8 indicates high-depth video; data is unnormalized
+      host-endian order unsigned signed 16-bit shorts (two octets).
+      For example, 10 bit video would declare a bit depth of 10, use the
+      lower 10 bits of each 16 bit short, and center on 512. */
+  int bitdepth;
 };
 
 /** Representation of an image or video frame. */
-struct od_img {
+struct daala_image {
   /** Typical 3 planes for Y, Cb, and  Cr. Can have a 4th plane for alpha */
-  od_img_plane planes[OD_NPLANES_MAX];
+  daala_image_plane planes[OD_NPLANES_MAX];
   /** Number of planes (1 for greyscale, 3 for YCbCr, 4 for YCbCr+Alpha ) */
   int nplanes;
   /** Width and height in pixels */
@@ -176,6 +189,17 @@ struct daala_plane_info {
   unsigned char ydec;
 };
 
+/**\name Bit Depths
+ * The three video bit depths currently supported by Daala.*/
+/*@{*/
+/**8-bit mode.*/
+#define OD_BITDEPTH_MODE_8 (1)
+/**10-bit mode.*/
+#define OD_BITDEPTH_MODE_10 (2)
+/**12-bit mode.*/
+#define OD_BITDEPTH_MODE_12 (3)
+/*@}*/
+
 /** Configuration parameters for a codec instance. */
 struct daala_info {
   unsigned char version_major;
@@ -189,13 +213,36 @@ struct daala_info {
   uint32_t timebase_numerator;
   uint32_t timebase_denominator;
   uint32_t frame_duration;
+  /**The amount to shift to extract the last keyframe number from the granule
+   *  position. */
   int keyframe_granule_shift;
+  /** bitdepth_mode is one of the three OD_BITDEPTH_MODE_X choices allowed
+   * above. */
+  int bitdepth_mode;
+  /**FPR must be on for high-depth, including lossless high-depth.
+     When FPR is on for 8-bit or 10-bit content, lossless frames are still
+      stored in reference buffers (and input buffers) with 8 + OD_COEFF_SHIFT
+      bit depth to allow streams with mixed lossy and lossless frames. Having a
+      mix of reference buffers stored in 10-bit and 12-bit precisions would be
+      a disaster, so we keep them all at 12-bit internally.
+   */
+  int full_precision_references;
   int nplanes;
   daala_plane_info plane_info[OD_NPLANES_MAX];
    /** key frame rate defined how often a key frame is emitted by encoder in
     * number of frames. So 10 means every 10th frame is a keyframe.  */
   int keyframe_rate;
 };
+
+typedef struct {
+  unsigned char *packet;
+  long bytes;
+  long b_o_s;
+  long e_o_s;
+
+  int64_t granulepos;
+  int64_t packetno;
+} daala_packet;
 
 void daala_info_init(daala_info *info);
 void daala_info_clear(daala_info *info);
@@ -217,8 +264,8 @@ void daala_info_clear(daala_info *info);
  *  names are limited to ASCII, and treated as case-insensitive.
  * See the Daala specification for details.
  *
- * In filling in this structure, daala_decode_header() will null-terminate the
- *  user_comment strings for safety.
+ * In filling in this structure, daala_decode_header_in() will null-terminate
+ *  the user_comment strings for safety.
  * However, the bitstream format itself treats them as 8-bit clean vectors,
  *  possibly containing null characters, and so the length array should be
  *  treated as their authoritative length.*/
@@ -234,30 +281,43 @@ struct daala_comment {
   char *vendor;
 };
 
+/**Initializes a daala_comment section. Users should free the returned
+   data with daala_comment_clear().
+   \param dc A #daala_comment structure.*/
 void daala_comment_init(daala_comment *dc);
+/**Free resources allocated for metadata.
+   \param dc A #daala_comment structure.*/
 void daala_comment_clear(daala_comment *dc);
 
 int64_t daala_granule_basetime(void *encdec, int64_t granpos);
+/**Converts a granule position to an absolute time in seconds.
+ * The granule position is interpreted in the context of a given
+ *  #daala_enc_ctx or #daala_dec_ctx handle (either will suffice).
+ * \param encdec  A previously allocated #daala_enc_ctx or #daala_dec_ctx
+ *                  handle.
+ * \param granpos The granule position to convert.
+ * \return The absolute time in seconds corresponding to \a granpos.
+ *         This is the "end time" for the frame, or the latest time it should
+ *          be displayed.
+ *         It is not the presentation time.
+ * \retval -1 The given granule position was invalid (i.e. negative).*/
 double daala_granule_time(void *encdec, int64_t granpos);
 /**Determines whether a Daala packet is a header or not.
    This function does no verification beyond checking the packet type bit, so
     it should not be used for bitstream identification.
    Use daala_decode_headerin() for that.
-   \param packet A buffer containing an encoded Daala packet.
-   \param len    The length of the buffer in bytes.
+   \param dpkt A daala_packet structure.
    \retval 1 The packet is a header packet.
    \retval 0 The packet is a video data packet.*/
-int daala_packet_isheader(const unsigned char *packet, int len);
+int daala_packet_isheader(daala_packet *dpkt);
 /**Determines whether a Daala packet is a key frame or not.
    This function does no verfication beyond checking the packet type and key
     frame bits, so it should not be used for bitstream identification.
    Feed the packet to an actual decoder for that.
-   \param packet A buffer containing an encoded Daala packet.
-   \param len    The length of the buffer in bytes.
+   \param dpkt A daala_packet structure.
    \retval 1  The packet contains a key frame.
-   \retval 0  The packet contains a delta frame.
-   \retval -1 The packet is not a video data packet.*/
-int daala_packet_iskeyframe(const unsigned char *packet, int len);
+   \retval 0  The packet contains a delta frame.*/
+int daala_packet_iskeyframe(daala_packet *dpkt);
 
 # if OD_GNUC_PREREQ(4, 0, 0)
 #  pragma GCC visibility pop

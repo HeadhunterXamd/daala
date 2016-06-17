@@ -43,7 +43,7 @@ AC_SUBST(OD_LT_CURRENT)
 AC_SUBST(OD_LT_REVISION)
 AC_SUBST(OD_LT_AGE)
 
-CFLAGS="-std=c89 -pedantic -Wall -Wextra -Wno-parentheses -Wno-long-long \
+CFLAGS="-std=c89 -pedantic -Wall -Wextra -Wno-long-long \
         -Wshadow -Wno-overlength-strings $CFLAGS $OD_CFLAGS"
 
 # Platform-specific tweaks
@@ -82,10 +82,23 @@ AC_ARG_ENABLE([logging],
 AS_IF([test "$enable_logging" = "yes"], [
   AC_DEFINE([OD_LOGGING_ENABLED], [1], [Enable logging])
 ])
+dnl Check for examples
+AC_ARG_ENABLE([examples],
+  AC_HELP_STRING([--disable-examples], [Disable the basic examples]),,
+  [enable_examples=yes])
+
+AS_IF([test "$enable_examples" = "yes"], [
+    PKG_CHECK_MODULES([OGG], [ogg >= 1.3])
+])
+
+AM_CONDITIONAL(ENABLE_EXAMPLES, [test $enable_examples = "yes"])
 
 AC_ARG_ENABLE([player],
   AS_HELP_STRING([--disable-player], [Disable the example player]),,
   enable_player=yes)
+
+AS_IF([test "$enable_examples" = "no"],
+      [enable_player = no])
 
 dnl Set LIBM to the math library if needed.
 LT_LIB_M
@@ -94,10 +107,9 @@ AC_CHECK_FUNCS([gettimeofday ftime],[break])
 
 AS_IF([test "$enable_player" = "yes"], [
   PKG_CHECK_MODULES([SDL], [sdl2])
+  PKG_CHECK_MODULES([OGG], [ogg >= 1.3])
 ])
 AM_CONDITIONAL([ENABLE_PLAYER_EXAMPLE], [test "$enable_player" = "yes"])
-
-PKG_CHECK_MODULES([OGG], [ogg >= 1.3])
 
 #CC_ATTRIBUTE_VISIBILITY([default], [
 #  CC_FLAG_VISIBILITY([CFLAGS="${CFLAGS} -fvisibility=hidden"])
@@ -112,6 +124,7 @@ if test "$enable_tools" = "yes" ; then
    AC_CHECK_LIB([jpeg],[jpeg_start_compress],[JPEG_LIBS="-ljpeg"],[AC_MSG_ERROR([libjpeg needed for building tools])])
    AC_SUBST([JPEG_LIBS])
    PKG_CHECK_MODULES([PNG], [libpng])
+   PKG_CHECK_MODULES([OGG], [ogg >= 1.3])
 
    AC_OPENMP
 fi
@@ -170,7 +183,7 @@ case $host_cpu in
   x86_64)
     cpu_x86=true
     ;;
-  arm|armhf)
+  arm*)
     cpu_arm=true
     ;;
 esac
@@ -228,7 +241,9 @@ AM_CONDITIONAL([ENABLE_SSE41_INTRINSICS],
  [test "$enable_asm" = "yes" -a "$cpu_x86" = "true" -a "$enable_sse41_intrinsics" = "yes"])
 AM_CONDITIONAL([ENABLE_AVX2_INTRINSICS],
  [test "$enable_asm" = "yes" -a "$cpu_x86" = "true" -a "$enable_avx2_intrinsics" = "yes"])
- 
+AM_CONDITIONAL([ENABLE_ARMASM],
+ [test "$enable_asm" = "yes" -a "$cpu_arm" = "true"])
+
 AS_IF([test "$enable_asm" = "yes" -a "$cpu_arm" = "true"], [
   AC_DEFINE([OD_ARMASM], [1], [Enable ARM asm optimisations])
   AC_DEFINE([OD_ARM_MAY_HAVE_NEON], [1], [Enable ARM NEON optimisations])
@@ -242,6 +257,14 @@ AS_IF([test "$enable_encoder_check" = "yes"], [
   AC_DEFINE([OD_ENCODER_CHECK], [1], [Enable comparison of reconstructed frames])
 ])
 AM_CONDITIONAL([ENCODER_CHECK], [test "$enable_encoder_check" = "yes"])
+
+AC_ARG_ENABLE([float-pvq],
+  AS_HELP_STRING([--enable-float-pvq], [Enable double precision PVQ]),,
+  [enable_float_pvq=no])
+
+AS_IF([test "$enable_float_pvq" = "yes"], [
+  AC_DEFINE([OD_FLOAT_PVQ], [1], [Enable double precision PVQ])
+])
 
 AC_ARG_ENABLE([dct-check-overflow],
   AS_HELP_STRING([--enable-dct-check-overflow], [Check for DCT overflow]),,
@@ -324,6 +347,7 @@ AC_ARG_ENABLE([analyzer],
   enable_analyzer=no)
 
 AS_IF([test "$enable_analyzer" = "yes"], [
+  PKG_CHECK_MODULES([OGG], [ogg >= 1.3])
   WX_CONFIG_OPTIONS
   WX_CONFIG_CHECK([2.8.0], [wxWin=1])
   if test "$wxWin" != 1 || test "$wx_ver_ok" != "yes"; then
@@ -364,12 +388,14 @@ AC_MSG_NOTICE([
     MC Animation  ................ ${enable_mc_animate}
     Reconstructed video dumping .. ${enable_dump_recons}
     Check encoder ................ ${enable_encoder_check}
+    Float PVQ .................... ${enable_float_pvq}
     Check DCT overflow............ ${enable_dct_check_overflow}
     Check assembly................ ${enable_check_asm}
     Bit accounting ............... ${enable_accounting}
     Entropy coder accounting ..... ${enable_ec_accounting}
     Tools ........................ ${enable_tools}
     Unit tests ................... ${enable_unit_tests}
+    Examples...................... ${enable_examples}
     Example Player................ ${enable_player}
     Stream Analyzer .............. ${enable_analyzer}
 ------------------------------------------------------------------------

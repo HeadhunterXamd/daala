@@ -42,27 +42,30 @@ int main(int argc, char *argv[]) {
     int max;
     int d;
     max = atoi(argv[1]);
-    printf("ogg_uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2]={\n");
+    printf("ogg_uint32_t OD_DIVU_SMALL_CONSTS[OD_DIVU_DMAX][2]={\n ");
     for (d = 1; d <= max; d++) {
       if ((d & (d - 1)) == 0) {
-        printf("  {0xFFFFFFFF,0xFFFFFFFF},\n");
+        printf(" {0xFFFFFFFF,0xFFFFFFFF},");
       }
       else {
         unsigned long long t;
         unsigned long long r;
         int m;
         m = OD_LOG2(d);
-        t = (1UL << m + NBITS)/d;
+        t = (1UL << (m + NBITS))/d;
         r = (t*d + d) & ((1UL << NBITS) - 1);
         if (r <= 1UL << m) {
-          printf("  {0x%llX,         0},\n", t + 1);
+          printf(" {0x%llX,         0},", t + 1);
         }
         else {
-          printf("  {0x%llX,0x%llX},\n", t, t);
+          printf(" {0x%llX,0x%llX},", t, t);
+        }
+        if (d % 3 == 0) {
+          printf("\n ");
         }
       }
     }
-    printf("};\n");
+    printf("\n};\n");
     return EXIT_SUCCESS;
   }
 }

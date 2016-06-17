@@ -71,9 +71,10 @@ CFLAGS := -DOD_ACCOUNTING $(CFLAGS)
 CFLAGS := -fPIC $(CFLAGS)
 CFLAGS := -std=c89 -pedantic $(CFLAGS)
 CFLAGS := -fvisibility=hidden $(CFLAGS)
-CFLAGS := -Wextra -Wno-parentheses -Wno-long-long -Wno-overlength-strings $(CFLAGS)
+CFLAGS := -Wextra -Wno-long-long -Wno-overlength-strings $(CFLAGS)
 CFLAGS := -Wall -Wshadow $(CFLAGS)
 CFLAGS := -I/opt/local/include $(CFLAGS)
+CFLAGS := -D_XOPEN_SOURCE=600 $(CFLAGS)
 # Set machine-specific flags
 HOST := $(shell uname -m)
 ifneq (,$(findstring 86,${HOST}))
@@ -118,10 +119,10 @@ LIBDAALABASE_CSOURCES = \
 $(if $(findstring -DOD_ACCOUNTING,${CFLAGS}), \
 accounting.c \
 ) \
-adapt.c \
 entcode.c \
 entdec.c \
 filter.c \
+dering.c \
 generic_code.c \
 generic_decoder.c \
 info.c \
@@ -134,12 +135,12 @@ mc.c \
 dct.c \
 partition.c \
 pvq.c \
-pvq_code.c \
 pvq_decoder.c \
 quantizer.c \
 state.c \
 switch_table.c \
 tf.c \
+util.c \
 zigzag4.c \
 zigzag8.c \
 zigzag16.c \
@@ -147,7 +148,9 @@ zigzag32.c \
 zigzag64.c \
 $(if $(findstring -DOD_X86ASM,${CFLAGS}), \
 x86/cpu.c \
+x86/sse2dering.c \
 x86/sse2mc.c \
+x86/sse2util.c \
 x86/x86state.c \
 ) \
 $(if $(findstring -DOD_LOGGING_ENABLED,${CFLAGS}), \
@@ -155,15 +158,12 @@ logging.c \
 )
 
 LIBDAALABASE_CHEADERS = \
-adapt.h \
 block_size.h \
 entcode.h \
 entdec.h \
 filter.h \
 generic_code.h \
-laplace_code.h \
 partition.h \
-pvq_code.h \
 internal.h \
 intra.h \
 logging.h \
@@ -171,6 +171,8 @@ mc.h \
 mcenc.h \
 odintrin.h \
 pvq.h \
+pvq_decoder.h \
+pvq_encoder.h \
 quantizer.h \
 state.h \
 tf.h \
@@ -195,7 +197,9 @@ infoenc.c \
 laplace_encoder.c \
 mcenc.c \
 pvq_encoder.c \
+rate.c \
 $(if $(findstring -DOD_X86ASM,${CFLAGS}), \
+x86/sse2mcenc.c \
 x86/x86enc.c \
 x86/x86mcenc.c \
 ) \

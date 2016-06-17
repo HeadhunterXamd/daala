@@ -150,7 +150,7 @@ static double calc_ssim(const unsigned char *_src,int _systride,
         memset(&m,0,sizeof(m));
         for(k=k_min;k<k_max;k++){
           unsigned window;
-          buf=lines[y+1-vkernel_sz+k&line_mask]+x;
+          buf = lines[(y + 1 - vkernel_sz + k) & line_mask] + x;
           window=vkernel[k];
           m.mux+=window*buf->mux;
           m.muy+=window*buf->muy;
@@ -173,12 +173,14 @@ static double calc_ssim(const unsigned char *_src,int _systride,
   }
   free(line_buf);
   free(lines);
+  free(vkernel);
+  free(hkernel);
   return ssim/ssimw;
 }
 
 static void usage(char *_argv[]){
   fprintf(stderr,"Usage: %s [options] <video1> <video2>\n"
-   "    <video1> and <video2> may be either YUV4MPEG or Ogg Theora files.\n\n"
+   "    <video1> and <video2> must be YUV4MPEG files.\n\n"
    "    Options:\n\n"
    "      -f --frame-type Show frame type and QI value for each Theora frame.\n"
    "      -r --raw        Show raw SSIM scores, instead of"
@@ -289,6 +291,7 @@ int main(int _argc,char *_argv[]){
     int             ret1;
     int             ret2;
     int             pli;
+    int             nplanes;
     ret1=video_input_fetch_frame(&vid1,f1,tag1);
     ret2=video_input_fetch_frame(&vid2,f2,tag2);
     if(ret1==0&&ret2==0)break;
@@ -304,7 +307,8 @@ int main(int _argc,char *_argv[]){
       break;
     }
     /*Okay, we got one frame from each.*/
-    for(pli=0;pli<3;pli++){
+    nplanes = luma_only ? 1 : 3;
+    for(pli=0;pli<nplanes;pli++){
       int xdec;
       int ydec;
       xdec=pli&&!(info1.pixel_fmt&1);

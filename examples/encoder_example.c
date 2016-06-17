@@ -33,7 +33,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #include <string.h>
 #include <time.h>
 #include <getopt.h>
-#include "../src/logging.h"
+#include <ogg/ogg.h>
 #include "daala/daalaenc.h"
 #if defined(_WIN32)
 # include <fcntl.h>
@@ -57,9 +57,34 @@ struct av_input{
   char video_chroma_type[16];
   int video_nplanes;
   daala_plane_info video_plane_info[OD_NPLANES_MAX];
-  od_img video_img;
+  daala_image video_img;
   int video_cur_img;
+  int video_depth;
+  int video_swapendian;
 };
+
+#define SWAP(a, b)  do {a ^= b; b ^= a; a ^= b;} while(0)
+
+static int host_is_big_endian() {
+  union {
+    uint16_t pattern;
+    unsigned char bytewise[2];
+  } m;
+  m.pattern = (uint16_t)0xdead; /* beef */
+  if (m.bytewise[0] == 0xde) return 1;
+  return 0;
+}
+
+static void daala_to_ogg_packet(ogg_packet *op, daala_packet *dp) {
+  op->packet     = dp->packet;
+  op->bytes      = dp->bytes;
+
+  op->b_o_s      = dp->b_o_s;
+  op->e_o_s      = dp->e_o_s;
+
+  op->granulepos = dp->granulepos;
+  op->packetno   = dp->packetno;
+}
 
 static int y4m_parse_tags(av_input *avin, char *tags) {
   int got_w;
@@ -146,7 +171,7 @@ static int y4m_parse_tags(av_input *avin, char *tags) {
 }
 
 static void id_y4m_file(av_input *avin, const char *file, FILE *test) {
-  od_img *img;
+  daala_image *img;
   unsigned char buf[128];
   int ret;
   int pli;
@@ -177,6 +202,10 @@ static void id_y4m_file(av_input *avin, const char *file, FILE *test) {
     fprintf(stderr, "Interlaced input is not currently supported.\n");
     exit(1);
   }
+  if (avin->video_fps_d <= 0) {
+    fprintf(stderr, "FPS denominator must be > 0.\n");
+    exit(1);
+  }
   avin->video_infile = test;
   avin->has_video = 1;
   fprintf(stderr, "File '%s' is %ix%i %0.03f fps %s video.\n",
@@ -186,8 +215,46 @@ static void id_y4m_file(av_input *avin, const char *file, FILE *test) {
   /*TODO: Specify chroma offsets.*/
   avin->video_plane_info[0].xdec = 0;
   avin->video_plane_info[0].ydec = 0;
+  avin->video_depth = 8;
+  avin->video_swapendian = 0;
   if (strcmp(avin->video_chroma_type, "444") == 0) {
     avin->video_nplanes = 3;
+    avin->video_plane_info[1].xdec = 0;
+    avin->video_plane_info[1].ydec = 0;
+    avin->video_plane_info[2].xdec = 0;
+    avin->video_plane_info[2].ydec = 0;
+  }
+  else if (strcmp(avin->video_chroma_type, "444p10") == 0) {
+    avin->video_nplanes = 3;
+    avin->video_depth = 10;
+    avin->video_swapendian = host_is_big_endian();
+    avin->video_plane_info[1].xdec = 0;
+    avin->video_plane_info[1].ydec = 0;
+    avin->video_plane_info[2].xdec = 0;
+    avin->video_plane_info[2].ydec = 0;
+  }
+  else if (strcmp(avin->video_chroma_type, "444p12") == 0) {
+    avin->video_nplanes = 3;
+    avin->video_depth = 12;
+    avin->video_swapendian = host_is_big_endian();
+    avin->video_plane_info[1].xdec = 0;
+    avin->video_plane_info[1].ydec = 0;
+    avin->video_plane_info[2].xdec = 0;
+    avin->video_plane_info[2].ydec = 0;
+  }
+  else if (strcmp(avin->video_chroma_type, "444p14") == 0) {
+    avin->video_nplanes = 3;
+    avin->video_depth = 14;
+    avin->video_swapendian = host_is_big_endian();
+    avin->video_plane_info[1].xdec = 0;
+    avin->video_plane_info[1].ydec = 0;
+    avin->video_plane_info[2].xdec = 0;
+    avin->video_plane_info[2].ydec = 0;
+  }
+  else if (strcmp(avin->video_chroma_type, "444p16") == 0) {
+    avin->video_nplanes = 3;
+    avin->video_depth = 16;
+    avin->video_swapendian = host_is_big_endian();
     avin->video_plane_info[1].xdec = 0;
     avin->video_plane_info[1].ydec = 0;
     avin->video_plane_info[2].xdec = 0;
@@ -204,6 +271,42 @@ static void id_y4m_file(av_input *avin, const char *file, FILE *test) {
   }
   else if (strcmp(avin->video_chroma_type, "422") == 0) {
     avin->video_nplanes = 3;
+    avin->video_plane_info[1].xdec = 1;
+    avin->video_plane_info[1].ydec = 0;
+    avin->video_plane_info[2].xdec = 1;
+    avin->video_plane_info[2].ydec = 0;
+  }
+  else if (strcmp(avin->video_chroma_type, "422p10") == 0) {
+    avin->video_nplanes = 3;
+    avin->video_depth = 10;
+    avin->video_swapendian = host_is_big_endian();
+    avin->video_plane_info[1].xdec = 1;
+    avin->video_plane_info[1].ydec = 0;
+    avin->video_plane_info[2].xdec = 1;
+    avin->video_plane_info[2].ydec = 0;
+  }
+  else if (strcmp(avin->video_chroma_type, "422p12") == 0) {
+    avin->video_nplanes = 3;
+    avin->video_depth = 12;
+    avin->video_swapendian = host_is_big_endian();
+    avin->video_plane_info[1].xdec = 1;
+    avin->video_plane_info[1].ydec = 0;
+    avin->video_plane_info[2].xdec = 1;
+    avin->video_plane_info[2].ydec = 0;
+  }
+  else if (strcmp(avin->video_chroma_type, "422p14") == 0) {
+    avin->video_nplanes = 3;
+    avin->video_depth = 14;
+    avin->video_swapendian = host_is_big_endian();
+    avin->video_plane_info[1].xdec = 1;
+    avin->video_plane_info[1].ydec = 0;
+    avin->video_plane_info[2].xdec = 1;
+    avin->video_plane_info[2].ydec = 0;
+  }
+  else if (strcmp(avin->video_chroma_type, "422p16") == 0) {
+    avin->video_nplanes = 3;
+    avin->video_depth = 16;
+    avin->video_swapendian = host_is_big_endian();
     avin->video_plane_info[1].xdec = 1;
     avin->video_plane_info[1].ydec = 0;
     avin->video_plane_info[2].xdec = 1;
@@ -226,6 +329,42 @@ static void id_y4m_file(av_input *avin, const char *file, FILE *test) {
     avin->video_plane_info[2].xdec = 1;
     avin->video_plane_info[2].ydec = 1;
   }
+  else if (strcmp(avin->video_chroma_type, "420p10") == 0){
+    avin->video_nplanes = 3;
+    avin->video_depth = 10;
+    avin->video_swapendian = host_is_big_endian();
+    avin->video_plane_info[1].xdec = 1;
+    avin->video_plane_info[1].ydec = 1;
+    avin->video_plane_info[2].xdec = 1;
+    avin->video_plane_info[2].ydec = 1;
+  }
+  else if (strcmp(avin->video_chroma_type, "420p12") == 0) {
+    avin->video_nplanes = 3;
+    avin->video_depth = 12;
+    avin->video_swapendian = host_is_big_endian();
+    avin->video_plane_info[1].xdec = 1;
+    avin->video_plane_info[1].ydec = 1;
+    avin->video_plane_info[2].xdec = 1;
+    avin->video_plane_info[2].ydec = 1;
+  }
+  else if (strcmp(avin->video_chroma_type, "420p14") == 0) {
+    avin->video_nplanes = 3;
+    avin->video_depth = 14;
+    avin->video_swapendian = host_is_big_endian();
+    avin->video_plane_info[1].xdec = 1;
+    avin->video_plane_info[1].ydec = 1;
+    avin->video_plane_info[2].xdec = 1;
+    avin->video_plane_info[2].ydec = 1;
+  }
+  else if (strcmp(avin->video_chroma_type, "420p16") == 0) {
+    avin->video_nplanes = 3;
+    avin->video_depth = 16;
+    avin->video_swapendian = host_is_big_endian();
+    avin->video_plane_info[1].xdec = 1;
+    avin->video_plane_info[1].ydec = 1;
+    avin->video_plane_info[2].xdec = 1;
+    avin->video_plane_info[2].ydec = 1;
+  }
   else if (strcmp(avin->video_chroma_type, "mono") == 0) {
     avin->video_nplanes = 1;
   }
@@ -239,15 +378,20 @@ static void id_y4m_file(av_input *avin, const char *file, FILE *test) {
   img->width = avin->video_pic_w;
   img->height = avin->video_pic_h;
   for (pli = 0; pli < img->nplanes; pli++) {
-    od_img_plane *iplane;
+    daala_image_plane *iplane;
     iplane = img->planes + pli;
     iplane->xdec = avin->video_plane_info[pli].xdec;
     iplane->ydec = avin->video_plane_info[pli].ydec;
-    iplane->xstride = 1;
-    iplane->ystride = (avin->video_pic_w
-     + (1 << iplane->xdec) - 1)  >>  iplane->xdec;
-    iplane->data = (unsigned char *)_ogg_malloc(iplane->ystride*
-     ((avin->video_pic_h + (1 << iplane->ydec) - 1)  >>  iplane->ydec));
+    /*At this moment, Y4M input is always planar.*/
+    /*The input depth need not match the encoded depth.
+      The input copy will convert to whatever was set for
+       di.bitdepth_mode.*/
+    iplane->xstride = avin->video_depth > 8 ? 2 : 1;
+    iplane->ystride = ((avin->video_pic_w
+     + (1<<iplane->xdec)-1)>>iplane->xdec)*iplane->xstride;
+    iplane->bitdepth = avin->video_depth;
+    iplane->data = _ogg_malloc(iplane->ystride*
+     ((avin->video_pic_h + (1<<iplane->ydec) - 1)>>iplane->ydec));
   }
 }
 
@@ -286,93 +430,118 @@ static void id_file(av_input *avin, const char *file) {
   }
 }
 
-int fetch_and_process_video(av_input *avin, ogg_page *page,
- ogg_stream_state *vo, daala_enc_ctx *dd, int video_ready,
- int *limit, int *skip) {
-  ogg_packet op;
-  while (!video_ready) {
+static int fetch(av_input *avin, int *limit, int *skip) {
+  for (;;) {
     size_t ret;
     char frame[6];
-    char c;
-    int last;
-    if (ogg_stream_pageout(vo, page) > 0) return 1;
-    else if (ogg_stream_eos(vo) || (limit && (*limit) < 0)) return 0;
+    daala_image *img;
+    int pli;
     ret = fread(frame, 1, 6, avin->video_infile);
-    if (ret == 6) {
-      od_img *img;
-      int pli;
-      if (memcmp(frame, "FRAME", 5) != 0) {
-        fprintf(stderr, "Loss of framing in YUV input data.\n");
+    if (ret != 6) {
+      return 1;
+    }
+    if (memcmp(frame, "FRAME", 5) != 0) {
+      fprintf(stderr, "Loss of framing in YUV input data.\n");
+      exit(1);
+    }
+    if (frame[5] != '\n') {
+      int bi;
+      char c;
+      for (bi = 0; bi < 121; bi++) {
+        if (fread(&c, 1, 1, avin->video_infile) == 1 && c == '\n') break;
+      }
+      if (bi >= 121) {
+        fprintf(stderr, "Error parsing YUV frame header.\n");
         exit(1);
       }
-      if (frame[5] != '\n') {
-        int bi;
-        for (bi = 0; bi < 121; bi++) {
-          if (fread(&c, 1, 1, avin->video_infile) == 1 && c == '\n') break;
-        }
-        if (bi >= 121) {
-          fprintf(stderr, "Error parsing YUV frame header.\n");
-          exit(1);
-        }
-      }
-      /*Read the frame data.*/
-      img = &avin->video_img;
-      for (pli = 0; pli < img->nplanes; pli++) {
-        od_img_plane *iplane;
-        size_t plane_sz;
-        iplane = img->planes + pli;
-        plane_sz = ((avin->video_pic_w + (1 << iplane->xdec) - 1)
-         >> iplane->xdec)*((avin->video_pic_h + (1 << iplane->ydec)
-         - 1) >> iplane->ydec);
-        ret = fread(iplane->data/* + (avin->video_pic_y >> iplane->ydec)
-         *iplane->ystride + (avin->video_picx >> iplane->xdec)*/, 1, plane_sz,
-         avin->video_infile);
-        if (ret != plane_sz) {
-          fprintf(stderr, "Error reading YUV frame data.\n");
-          exit(1);
-        }
-      }
-      if (skip && (*skip) > 0) {
-        (*skip)--;
-        continue;
-      }
-      if (limit) {
-        last = (*limit) == 0;
-        (*limit)--;
-      }
-      else last = 0;
     }
-    else last = 1;
-    /*Pull the packets from the previous frame, now that we know whether or not
-       we can read the current one.
-      This is used to set the e_o_s bit on the final packet.*/
-    while (daala_encode_packet_out(dd, last, &op)) {
-      ogg_stream_packetin(vo, &op);
+    /*Read the frame data.*/
+    img = &avin->video_img;
+    for (pli = 0; pli < img->nplanes; pli++) {
+      daala_image_plane *iplane;
+      int bytes;
+      size_t plane_sz;
+      iplane = &img->planes[pli];
+      bytes = iplane->bitdepth > 8 ? 2 : 1;
+      plane_sz = ((avin->video_pic_w + iplane->xdec) >> iplane->xdec)*
+       ((avin->video_pic_h + iplane->ydec) >> iplane->ydec)*bytes;
+      ret = fread(iplane->data, 1, plane_sz, avin->video_infile);
+      if (ret != plane_sz) {
+        fprintf(stderr, "Error reading YUV frame data.\n");
+        exit(1);
+      }
+      if (bytes == 2 && avin->video_swapendian) {
+        size_t i;
+        for (i = 0; i < plane_sz; i += 2) {
+          SWAP(iplane->data[i], iplane->data[i + 1]);
+        }
+      }
     }
-    /*Submit the current frame for encoding.*/
-    if (!last) daala_encode_img_in(dd, &avin->video_img, 0);
+    if (skip && (*skip) > 0) {
+      (*skip)--;
+      continue;
+    }
+    if (limit) {
+      if (*limit <= 0) {
+        return 1;
+      }
+      (*limit)--;
+    }
+    return 0;
   }
-  return video_ready;
 }
 
-static const char *OPTSTRING = "ho:k:v:V:s:S:l:z:";
+int fetch_and_process_video(av_input *avin, ogg_page *page,
+ ogg_stream_state *vo, daala_enc_ctx *dd, int *limit, int *skip) {
+  for (;;) {
+    int end_of_input;
+    daala_packet dp;
+    if (ogg_stream_pageout(vo, page) > 0) {
+      return 1;
+    }
+    if (ogg_stream_eos(vo)) {
+      return 0;
+    }
+    end_of_input = fetch(avin, limit, skip);
+    while (daala_encode_packet_out(dd, end_of_input, &dp)) {
+      ogg_packet op;
+      daala_to_ogg_packet(&op, &dp);
+      ogg_stream_packetin(vo, &op);
+    }
+    if (!end_of_input) {
+      if (daala_encode_img_in(dd, &avin->video_img, 0)) {
+        fprintf(stderr, "Error adding input frame to encoder.\n");
+        exit(1);
+      }
+    }
+  }
+}
+
+static const char *OPTSTRING = "ho:k:b:v:V:s:S:l:z:d:";
 
 static const struct option OPTIONS[] = {
   { "help", no_argument, NULL, 'h' },
   { "output", required_argument, NULL, 'o' },
   { "keyframe-rate", required_argument, NULL, 'k' },
+  { "buf-delay",required_argument,NULL,'d'},
+  { "b-frames", required_argument, NULL, 'b' },
   { "video-quality", required_argument, NULL, 'v' },
   { "video-rate-target", required_argument, NULL, 'V' },
   { "serial", required_argument, NULL, 's' },
   { "skip", required_argument, NULL, 'S' },
   { "limit", required_argument, NULL, 'l' },
   { "complexity", required_argument, NULL, 'z' },
+  { "soft-target",no_argument,NULL,0},
   { "mc-use-chroma", no_argument, NULL, 0 },
   { "no-mc-use-chroma", no_argument, NULL, 0 },
   { "mc-use-satd", no_argument, NULL, 0 },
   { "no-mc-use-satd", no_argument, NULL, 0 },
   { "activity-masking", no_argument, NULL, 0 },
   { "no-activity-masking", no_argument, NULL, 0 },
+  { "dering", no_argument, NULL, 0 },
+  { "no-dering", no_argument, NULL, 0 },
+  { "fpr", no_argument, NULL, 0 },
+  { "no-fpr", no_argument, NULL, 0 },
   { "qm", required_argument, NULL, 0 },
   { "mv-res-min", required_argument, NULL, 0 },
   { "mv-level-min", required_argument, NULL, 0 },
@@ -391,17 +560,37 @@ static void usage(void) {
    "                                 compressed data is written to.\n"
    "                                 a file named video_file.out.ogv.\n\n"
    "  -k --keyframe-rate <n>         Frequency of keyframes in output.\n\n"
+   "  -b --b-frames <n>              Number of B-frames between two\n"
+   "                                 reference frames. Default 0\n"
+   "                                 (i.e. P frames only). Max 4.\n\n"
    "  -v --video-quality <n>         Daala quality selector from 0 to 511.\n"
    "                                 511 yields the smallest files, but\n"
    "                                 lowest video quality; 1 yields the\n"
    "                                 highest quality, but large files;\n"
    "                                 0 is lossless.\n\n"
-   "  -V --video-rate-target <n>     bitrate target for Daala video;\n"
+   "  -V --video-rate-target <n>     bitrate target for Daala video in kbps;\n"
    "                                 use -v and not -V if at all possible,\n"
    "                                 as -v gives higher quality for a given\n"
-   "                                 bitrate. (Not yet implemented)\n\n"
+   "                                 bitrate.\n\n"
+   "  -d --buf-delay <n>             Buffer delay (in frames). Longer delays\n"
+   "                                 allow smoother rate adaptation and\n"
+   "                                 provide better overall quality, but\n"
+   "                                 require more client side buffering and\n"
+   "                                 add latency. The default value is the\n"
+   "                                 keyframe interval for one-pass encoding\n"
+   "                                 (or somewhat larger if --soft-target is\n"
+   "                                 used) and the total remaining length of\n"
+   "                                 the video for two-pass encoding.\n\n"
+   "     --soft-target               Use a large reservoir and treat the\n"
+   "                                 rate as a soft target; rate control is\n"
+   "                                 less strict but resulting quality is\n"
+   "                                 usually higher/smoother overall. Soft\n"
+   "                                 target also allows an optional -v\n"
+   "                                 setting to specify a minimum allowed\n"
+   "                                 quality.\n\n"
    "  -s --serial <n>                Specify a serial number for the stream.\n"
-   "  -S --skip <n>                  Number of input frames to skip before encoding.\n"
+   "  -S --skip <n>                  Number of input frames to skip before\n"
+   "                                 encoding.\n\n"
    "  -l --limit <n>                 Maximum number of frames to encode.\n"
    "  -z --complexity <n>            Computational complexity: 0...10\n"
    "                                 Fastest: 0, slowest: 10, default: 7\n"
@@ -413,18 +602,22 @@ static void usage(void) {
    "                                 --no-mc-use-satd is implied by default.\n"
    "     --[no-]activity-masking     Control whether activity masking should\n"
    "                                 be used in quantization.\n"
+   "     --[no-]dering               Enable (default) or disable the dering\n"
+   "                                 postprocessing filter.\n"
+   "     --[no-]fpr                  Disable (default) or enable full \n"
+   "                                 precision references.\n"
+   "     --qm <n>                    Select quantization matrix\n"
+   "                                 0 => flat, 1 => hvs (default)\n"
    "                                 --activity-masking is implied by default.\n"
    "     --mv-res-min <n>            Minimum motion vectors resolution for the\n"
    "                                 motion compensation search.\n"
    "                                 0 => 1/8 pel (default), 1 => 1/4 pel,\n"
    "                                 2 => 1/2 pel\n"
-   "     --qm <n>                    Select quantization matrix\n"
-   "                                 0 => flat, 1 => hvs (default)\n"
    "     --mv-level-min <n>          Minimum motion vectors level between\n"
    "                                 0 (default) and 6.\n"
    "     --mv-level-max <n>          Maximum motion vectors level between\n"
    "                                 0 and 6 (default).\n"
-   "     --version                   Displays version information."
+   "     --version                   Displays version information.\n"
    " encoder_example accepts only uncompressed YUV4MPEG2 video.\n\n");
   exit(1);
 }
@@ -440,6 +633,7 @@ int main(int argc, char **argv) {
   ogg_stream_state vo;
   ogg_page og;
   ogg_packet op;
+  daala_packet dp;
   daala_enc_ctx *dd;
   daala_info di;
   daala_comment dc;
@@ -450,12 +644,14 @@ int main(int argc, char **argv) {
   int loi;
   int ret;
   double video_kbps;
+  int soft_target;
+  int buf_delay;
   int video_q;
+  long video_r;
   int video_keyframe_rate;
-  int video_ready;
   int pli;
   int fixedserial;
-  unsigned int serial;
+  int serial;
   int skip;
   int limit;
   int complexity;
@@ -463,12 +659,15 @@ int main(int argc, char **argv) {
   int mc_use_chroma;
   int mc_use_satd;
   int use_activity_masking;
+  int use_dering;
+  int use_fpr;
   int qm;
   int mv_res_min;
   int mv_level_min;
   int mv_level_max;
   int current_frame_no;
   int output_provided;
+  int b_frames;
   char default_filename[1024];
   clock_t t0;
   clock_t t1;
@@ -486,7 +685,11 @@ int main(int argc, char **argv) {
   avin.video_fps_d = -1;
   avin.video_par_n = -1;
   avin.video_par_d = -1;
-  video_q = 10;
+  /* Set default options */
+  video_q = -1;
+  video_r = -1;
+  buf_delay = -1;
+  soft_target = 0;
   video_keyframe_rate = 256;
   video_bytesout = 0;
   fixedserial = 0;
@@ -494,13 +697,16 @@ int main(int argc, char **argv) {
   limit = -1;
   complexity = 7;
   mc_use_chroma = 1;
-  mc_use_satd = 0;
+  mc_use_satd = 1;
   use_activity_masking = 1;
+  use_dering = 1;
+  use_fpr = 0;
   qm = 1;
   mv_res_min = 0;
   mv_level_min = 0;
   mv_level_max = 6;
   output_provided = 0;
+  b_frames = 0;
   while ((c = getopt_long(argc, argv, OPTSTRING, OPTIONS, &loi)) != EOF) {
     switch (c) {
       case 'o': {
@@ -521,6 +727,15 @@ int main(int argc, char **argv) {
         }
         break;
       }
+      case 'b': {
+        b_frames = atoi(optarg);
+        if (b_frames < 0 || b_frames > 4) {
+          fprintf(stderr,
+           "Illegal number of B frames (use 0 through 4)\n");
+          exit(1);
+        }
+        break;
+      }
       case 'v': {
         video_q = atoi(optarg);
         if (video_q < 0 || video_q > 511) {
@@ -530,13 +745,23 @@ int main(int argc, char **argv) {
         break;
       }
       case 'V': {
-        fprintf(stderr,
-         "Target video bitrate is not yet implemented, use -v instead.\n");
-        exit(1);
+        video_r = (long)floor(atof(optarg)*1000.f + .5f);
+        if (video_r <= 0) {
+          fprintf(stderr,"Illegal video bitrate (choose > 0 please)\n");
+          exit(1);
+        }
+        break;
+      }
+      case 'd': {
+        buf_delay = atoi(optarg);
+        if (buf_delay <= 0) {
+          fprintf(stderr,"Illegal buffer delay\n");
+          exit(1);
+        }
         break;
       }
       case 's': {
-        if (sscanf(optarg, "%u", &serial) != 1) {
+        if (sscanf(optarg, "%i", &serial) != 1) {
           serial = 0;
         }
         else {
@@ -572,7 +797,10 @@ int main(int argc, char **argv) {
         break;
       }
       case 0: {
-        if (strcmp(OPTIONS[loi].name, "mc-use-chroma") == 0) {
+        if (strcmp(OPTIONS[loi].name, "soft-target") == 0) {
+          soft_target = 1;
+        }
+        else if (strcmp(OPTIONS[loi].name, "mc-use-chroma") == 0) {
           mc_use_chroma = 1;
         }
         else if (strcmp(OPTIONS[loi].name, "no-mc-use-chroma") == 0) {
@@ -589,6 +817,18 @@ int main(int argc, char **argv) {
         }
         else if (strcmp(OPTIONS[loi].name, "no-activity-masking") == 0) {
           use_activity_masking = 0;
+        }
+        else if (strcmp(OPTIONS[loi].name, "dering") == 0) {
+          use_dering = 1;
+        }
+        else if (strcmp(OPTIONS[loi].name, "no-dering") == 0) {
+          use_dering = 0;
+        }
+        else if (strcmp(OPTIONS[loi].name, "fpr") == 0) {
+          use_fpr = 1;
+        }
+        else if (strcmp(OPTIONS[loi].name, "no-fpr") == 0) {
+          use_fpr = 0;
         }
         else if (strcmp(OPTIONS[loi].name, "mv-res-min") == 0) {
           mv_res_min = atoi(optarg);
@@ -637,6 +877,23 @@ int main(int argc, char **argv) {
       default: usage(); break;
     }
   }
+  if (soft_target) {
+    if (video_r <= 0){
+      fprintf(stderr,
+       "Soft rate target (--soft-target) requested without a bitrate (-V).\n");
+      exit(1);
+    }
+  }
+  if (video_q == -1) {
+    if (video_r > 0) {
+      /*Rate control uses -v as a minimum quality below which the
+         encoder won't dip */
+      video_q = 512;
+    }
+    else {
+      video_q = 10;
+    }
+  }
   /*Assume anything following the options must be a file name.*/
   for (; optind < argc; optind++) id_file(&avin, argv[optind]);
   if(!output_provided){
@@ -659,11 +916,36 @@ int main(int argc, char **argv) {
   daala_info_init(&di);
   di.pic_width = avin.video_pic_w;
   di.pic_height = avin.video_pic_h;
+  switch (avin.video_depth) {
+    case 8: {
+      di.bitdepth_mode = OD_BITDEPTH_MODE_8;
+      break;
+    }
+    case 10: {
+      di.bitdepth_mode = OD_BITDEPTH_MODE_10;
+      break;
+    }
+    case 14:
+    case 16: {
+      fprintf(stderr, "Daala natively supports only 8, 10 and 12 bit depth\n"
+       "Input will be truncated to 12 bit depth for encoding\b\n");
+    }
+    /* Fall through */
+    case 12: {
+      di.bitdepth_mode = OD_BITDEPTH_MODE_12;
+      break;
+    }
+    default: {
+      fprintf(stderr, "Unsupported input bit depth (%d)\n", avin.video_depth);
+      exit(1);
+    }
+  }
   di.timebase_numerator = avin.video_fps_n;
   di.timebase_denominator = avin.video_fps_d;
   di.frame_duration = 1;
   di.pixel_aspect_numerator = avin.video_par_n;
   di.pixel_aspect_denominator = avin.video_par_d;
+  di.full_precision_references = use_fpr;
   di.nplanes = avin.video_nplanes;
   memcpy(di.plane_info, avin.video_plane_info,
    di.nplanes*sizeof(*di.plane_info));
@@ -674,23 +956,70 @@ int main(int argc, char **argv) {
   /*Set up encoder.*/
   daala_encode_ctl(dd, OD_SET_QUANT, &video_q, sizeof(video_q));
   daala_encode_ctl(dd, OD_SET_COMPLEXITY, &complexity, sizeof(complexity));
-  daala_encode_ctl(dd, OD_SET_MC_USE_CHROMA, &mc_use_chroma,
+  daala_encode_ctl(dd, OD_SET_MC_CHROMA, &mc_use_chroma,
    sizeof(mc_use_chroma));
-  daala_encode_ctl(dd, OD_SET_MC_USE_SATD, &mc_use_satd,
+  daala_encode_ctl(dd, OD_SET_MC_SATD, &mc_use_satd,
    sizeof(mc_use_satd));
-  daala_encode_ctl(dd, OD_SET_USE_ACTIVITY_MASKING, &use_activity_masking,
+  daala_encode_ctl(dd, OD_SET_ACTIVITY_MASKING, &use_activity_masking,
    sizeof(use_activity_masking));
+  daala_encode_ctl(dd, OD_SET_DERING, &use_dering,
+   sizeof(use_dering));
   daala_encode_ctl(dd, OD_SET_MV_RES_MIN, &mv_res_min, sizeof(mv_res_min));
   daala_encode_ctl(dd, OD_SET_QM, &qm, sizeof(qm));
   daala_encode_ctl(dd, OD_SET_MV_LEVEL_MIN, &mv_level_min, sizeof(mv_level_min));
   daala_encode_ctl(dd, OD_SET_MV_LEVEL_MAX, &mv_level_max, sizeof(mv_level_max));
+  daala_encode_ctl(dd, OD_SET_B_FRAMES, &b_frames, sizeof(b_frames));
+  if (video_r > 0) {
+    /*Account for the Ogg page overhead.
+      This is 1 byte per 255 for lacing values, plus 26 bytes per 4096
+       bytes for the page header, plus approximately 1/2 byte per packet
+       (not accounted for here).*/
+    video_r = (int)(64870*(int64_t)video_r>>16);
+    if (daala_encode_ctl(dd, OD_SET_BITRATE, &video_r, sizeof(video_r)) !=
+        OD_SUCCESS) {
+      fprintf(stderr, "Unable to enable bitrate management.\n");
+      exit(1);
+    }
+  }
+  if (soft_target) {
+    /*Reverse the default rate control flags to favor a 'long time' strategy.*/
+    int arg = OD_RATECTL_CAP_UNDERFLOW;
+    if (daala_encode_ctl(dd, OD_SET_RATE_FLAGS, &arg,
+     sizeof(arg)) != OD_SUCCESS) {
+      fprintf(stderr,"Could not set encoder flags for --soft-target\n");
+      exit(1);
+    }
+    if (buf_delay < 0) {
+      if ((video_keyframe_rate*7 >> 1) > 5*avin.video_fps_n/avin.video_fps_d) {
+        arg = video_keyframe_rate*7 >> 1;
+      }
+      else {
+        arg = 5*avin.video_fps_n/avin.video_fps_d;
+      }
+      if (daala_encode_ctl(dd, OD_SET_RATE_BUFFER, &arg,\
+       sizeof(arg)) != OD_SUCCESS) {
+        fprintf(stderr,
+         "Could not set rate control buffer for --soft-target\n");
+        exit(1);
+      }
+    }
+  }
+  /*Now we can set the buffer delay if the user requested a non-default
+     value.*/
+  if (buf_delay >= 0) {
+    if (daala_encode_ctl(dd,OD_SET_RATE_BUFFER, &buf_delay,
+     sizeof(buf_delay)) != OD_SUCCESS) {
+      fprintf(stderr,"Warning: could not set desired buffer delay.\n");
+    }
+  }
   /*Write the bitstream header packets with proper page interleave.*/
   /*The first packet for each logical stream will get its own page
      automatically.*/
-  if (daala_encode_flush_header(dd, &dc, &op) <= 0) {
+  if (daala_encode_flush_header(dd, &dc, &dp) <= 0) {
     fprintf(stderr, "Internal Daala library error.\n");
     exit(1);
   }
+  daala_to_ogg_packet(&op, &dp);
   ogg_stream_packetin(&vo, &op);
   if (ogg_stream_pageout(&vo, &og) != 1) {
     fprintf(stderr, "Internal Ogg library error.\n");
@@ -706,12 +1035,13 @@ int main(int argc, char **argv) {
   }
   /*Create and buffer the remaining Daala headers.*/
   for (;;) {
-    ret = daala_encode_flush_header(dd, &dc, &op);
+    ret = daala_encode_flush_header(dd, &dc, &dp);
     if (ret < 0) {
       fprintf(stderr, "Internal Daala library error.\n");
       exit(1);
     }
     else if (!ret) break;
+    daala_to_ogg_packet(&op, &dp);
     ogg_stream_packetin(&vo, &op);
   }
   for (;;) {
@@ -733,18 +1063,17 @@ int main(int argc, char **argv) {
   /*Setup complete.
      Main compression loop.*/
   fprintf(stderr, "Compressing...\n");
-  video_ready = 0;
   t0 = clock();
   for (;;) {
     ogg_page video_page;
     double video_time;
     double video_fps = avin.video_fps_n/avin.video_fps_d;
     size_t bytes_written;
-    video_ready = fetch_and_process_video(&avin, &video_page, &vo,
-     dd, video_ready, limit >= 0 ? &limit : NULL, skip > 0 ? &skip : NULL);
-    /*TODO: Fetch the next video page.*/
     /*If no more pages are available, we've hit the end of the stream.*/
-    if (!video_ready) break;
+    if (!fetch_and_process_video(&avin, &video_page, &vo, dd,
+     limit > -1 ? &limit : NULL, skip > 0 ? &skip : NULL)) {
+      break;
+    }
     video_time = daala_granule_time(dd, ogg_page_granulepos(&video_page));
     bytes_written =
      fwrite(video_page.header, 1, video_page.header_len, outfile);
@@ -760,7 +1089,6 @@ int main(int argc, char **argv) {
     }
     fflush(outfile);
     video_bytesout += bytes_written;
-    video_ready = 0;
     if (video_time == -1) continue;
     video_kbps = video_bytesout*8*0.001/video_time;
     time_base = video_time;
@@ -776,8 +1104,8 @@ int main(int argc, char **argv) {
     fprintf(stderr,
      "     %i:%02i:%02i.%02i video: %0.0fkbps - Frame %i - %0.2f FPS - %0.2f FPM     ",
      (int)time_base/3600, ((int)time_base/60)%60, (int)time_base % 60,
-     (int)(time_base*100 - (long)time_base*100), video_kbps, current_frame_no, 
-     (current_frame_no)/time_spent, 
+     (int)(time_base*100 - (long)time_base*100), video_kbps, current_frame_no,
+     (current_frame_no)/time_spent,
      (current_frame_no)/time_spent*60);
   }
   ogg_stream_clear(&vo);

@@ -33,10 +33,16 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 # endif
 
 void od_state_opt_vtbl_init_x86(od_state *_state);
-
-void od_mc_predict1fmv8_sse2(unsigned char *_dst,const unsigned char *_src,
- int _systride,int32_t _mvx,int32_t _mvy,
+extern const od_filter_dering_direction_func
+ OD_DERING_DIRECTION_SSE2[OD_DERINGSIZES];
+extern const od_filter_dering_orthogonal_func
+ OD_DERING_ORTHOGONAL_SSE2[OD_DERINGSIZES];
+void od_mc_predict1fmv8_sse2(od_state *state, unsigned char *_dst,
+ const unsigned char *_src, int _systride, int32_t _mvx, int32_t _mvy,
  int _log_xblk_sz,int _log_yblk_sz);
+void od_mc_predict1fmv16_sse2(od_state *state, unsigned char *_dst,
+ const unsigned char *_src, int _systride, int32_t _mvx, int32_t _mvy,
+ int _log_xblk_sz, int _log_yblk_sz);
 void od_mc_blend_full8_sse2(unsigned char *_dst,int _dystride,
  const unsigned char *_src[4],int _log_xblk_sz,int _log_yblk_sz);
 void od_mc_blend_full_split8_sse2(unsigned char *_dst,int _dystride,
@@ -61,5 +67,18 @@ void od_bin_fdct8x8_avx2(od_coeff *y, int ystride,
  const od_coeff *x, int xstride);
 void od_bin_idct8x8_avx2(od_coeff *x, int xstride,
  const od_coeff *y, int ystride);
-
+void od_copy_16x16_8_sse2(unsigned char *_dst, int _dstride,
+ const unsigned char *_src, int _sstride);
+void od_copy_32x32_8_sse2(unsigned char *_dst, int _dstride,
+ const unsigned char *_src, int _sstride);
+void od_copy_64x64_8_sse2(unsigned char *_dst, int _dstride,
+ const unsigned char *_src, int _sstride);
+void od_filter_dering_direction_4x4_sse2(int16_t *y, int ystride,
+ const int16_t *in, int threshold, int dir);
+void od_filter_dering_direction_8x8_sse2(int16_t *y, int ystride,
+ const int16_t *in, int threshold, int dir);
+void od_filter_dering_orthogonal_4x4_sse2(int16_t *y, int ystride,
+ const int16_t *in, const int16_t *x, int xstride, int threshold, int dir);
+void od_filter_dering_orthogonal_8x8_sse2(int16_t *y, int ystride,
+ const int16_t *in, const int16_t *x, int xstride, int threshold, int dir);
 #endif

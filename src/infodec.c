@@ -109,7 +109,7 @@ static int od_comment_unpack(daala_comment *dc, oggbyte_buffer *obb) {
 }
 
 int daala_decode_header_in(daala_info *info,
- daala_comment *dc, daala_setup_info **ds, const ogg_packet *op) {
+ daala_comment *dc, daala_setup_info **ds, const daala_packet *op) {
   oggbyte_buffer obb;
   int packtype;
   int rv;
@@ -138,7 +138,7 @@ int daala_decode_header_in(daala_info *info,
       int tmpi;
       /*This should be the first packet, and we should not have already read
          the info header packet yet.*/
-      if (!op->b_o_s || info->pic_width) return OD_EBADHEADER;
+      if (info->pic_width) return OD_EBADHEADER;
       tmpi = oggbyte_read1(&obb);
       if (tmpi < 0) return OD_EBADHEADER;
       info->version_major = tmpi;
@@ -175,6 +175,12 @@ int daala_decode_header_in(daala_info *info,
       tmpi = oggbyte_read1(&obb);
       if (tmpi < 0 || tmpi >= 32) return OD_EBADHEADER;
       info->keyframe_granule_shift = tmpi;
+      info->bitdepth_mode = oggbyte_read1(&obb);
+      if (info->bitdepth_mode < OD_BITDEPTH_MODE_8
+       || info->bitdepth_mode > OD_BITDEPTH_MODE_12) {
+        return OD_EBADHEADER;
+      }
+      info->full_precision_references = oggbyte_read1(&obb);
       info->nplanes = oggbyte_read1(&obb);
       if ((info->nplanes < 1) || (info->nplanes > OD_NPLANES_MAX)) {
         return OD_EBADHEADER;

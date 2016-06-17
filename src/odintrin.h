@@ -35,6 +35,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #include <string.h>
 #include "../include/daala/codec.h"
 
+/* This way we know we've included the Daala version of odintrin.h */
+#define DAALA_ODINTRIN (1)
+
 # if !defined(M_PI)
 #  define M_PI      (3.1415926535897932384626433832795)
 # endif
@@ -105,6 +108,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
   This assumes a char is 8 bits.*/
 # define OD_CLAMP255(x) \
   ((unsigned char)((((x) < 0) - 1) & ((x) | -((x) > 255))))
+/*Clamps a signed integer to between 0 and (1 << 8 + OD_COEFF_SHIFT) - 1,
+   returning an uint16_t.*/
+# define OD_CLAMPFPR(x) \
+  ((uint16_t)((((x) < 0) - 1) & \
+  ((x) | -((x) > (1 << (8 + OD_COEFF_SHIFT)) - 1)) & \
+  ((1 << (8 + OD_COEFF_SHIFT)) - 1)))
 /*Divides a signed integer by a positive value with exact rounding.*/
 # define OD_DIV_ROUND(x, y) (((x) + OD_FLIPSIGNI((y) >> 1, x))/(y))
 # define OD_DIV_R0(x, y) (((x) + OD_FLIPSIGNI((((y) + 1) >> 1) - 1, (x)))/(y))
@@ -134,13 +143,65 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 # define OD_DIV2_RE(x) ((x) + ((x) >> 1 & 1) >> 1)
 /*Divides a x by (1 << (shift)), rounding towards even numbers.*/
 # define OD_DIV_POW2_RE(x, shift) \
-  ((x) + (((1 << (shift)) + ((x) >> (shift) & 1) - 1) >> 1) >> (shift))
+  (((x) + (((1 << (shift)) + ((x) >> (shift) & 1) - 1) >> 1)) >> (shift))
+#if defined(OD_FLOAT_PVQ)
+typedef double od_val16;
+typedef double od_val32;
+# define OD_ROUND16(x) (x)
+# define OD_ROUND32(x) (x)
+# define OD_SHL(x, shift) (x)
+# define OD_SHR(x, shift) (x)
+# define OD_SHR_ROUND(x, shift) (x)
+# define OD_ABS(x) (fabs(x))
+# define OD_MULT16_16(a, b) ((a)*(b))
+# define OD_MULT16_32_Q16(a, b) ((a)*(b))
+#else
+typedef int16_t od_val16;
+typedef int32_t od_val32;
+# define OD_ROUND16(x) (int16_t)(floor(.5 + (x)))
+# define OD_ROUND32(x) (int32_t)(floor(.5 + (x)))
+/*Shift x left by shift*/
+# define OD_SHL(a, shift) ((int32_t)((uint32_t)(a) << (shift)))
+/*Shift x right by shift (without rounding)*/
+# define OD_SHR(x, shift) \
+  ((int32_t)((x) >> (shift)))
+/*Shift x right by shift (with rounding)*/
+# define OD_SHR_ROUND(x, shift) \
+  ((int32_t)(((x) + (1 << (shift) >> 1)) >> (shift)))
+/*Shift x right by shift (without rounding) or left by -shift if shift
+  is negative.*/
+# define OD_VSHR(x, shift) \
+  ((shift) > 0 ? (int32_t)((x) >> (shift)) \
+  : (int32_t)((x) << -(shift)))
+/*Shift x right by shift (with rounding) or left by -shift if shift
+  is negative.*/
+# define OD_VSHR_ROUND(x, shift) \
+  ((shift) > 0 ? (int32_t)(((x) + (1 << (shift) >> 1)) >> (shift)) \
+  : (int32_t)((x) << -(shift)))
+# define OD_ABS(x) (abs(x))
+/* (od_val32)(od_val16) gives TI compiler a hint that it's 16x16->32 multiply */
+/** 16x16 multiplication where the result fits in 32 bits */
+# define OD_MULT16_16(a, b) \
+ (((od_val32)(od_val16)(a))*((od_val32)(od_val16)(b)))
+/* Multiplies 16-bit a by 32-bit b and keeps bits [16:47]. */
+# define OD_MULT16_32_Q16(a, b) ((int16_t)(a)*(int64_t)(int32_t)(b) >> 16)
+/*16x16 multiplication where the result fits in 16 bits, without rounding.*/
+# define OD_MULT16_16_Q15(a,b) \
+  (((int16_t)(a)*((int32_t)(int16_t)(b))) >> 15)
+/*16x16 multiplication where the result fits in 16 bits, without rounding.*/
+# define OD_MULT16_16_Q16(a,b) \
+  ((((int16_t)(a))*((int32_t)(int16_t)(b))) >> 16)
+#endif
+
 /*Count leading zeros.
   This macro should only be used for implementing od_ilog(), if it is defined.
   All other code should use OD_ILOG() instead.*/
 # if defined(_MSC_VER)
 #  include <intrin.h>
-#  if !defined(snprintf)
+/*Visual Studio 2015 (version "14" and _MSC_VER == 1900) finally provides
+   proper support for snprintf() in stdio.h.
+  Only #define snprintf with versions earlier than VS2015.*/
+#  if _MSC_VER < 1900 && !defined(snprintf)
 #   define snprintf _snprintf
 #  endif
 /*In _DEBUG mode this is not an intrinsic by default.*/
@@ -246,6 +307,9 @@ static __inline int od_bsr(unsigned long x) {
 #else
 # define OD_EXTERN
 #endif
+
+/** Silence unused parameter/variable warnings */
+# define OD_UNUSED(expr) (void)(expr)
 
 /*Some assembly constructs require aligned operands.
   The following macros are _only_ intended for structure member declarations.

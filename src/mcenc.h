@@ -28,9 +28,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 /*Flag indicating we include the chroma planes in our SAD calculations.*/
 # define OD_MC_USE_CHROMA (1 << 0)
 
-/* The maximum search range for BMA. Also controls hit cache size. */
-#define OD_MC_SEARCH_RANGE (64)
+/*The maximum search range for BMA in fullpel units. Also controls hit cache
+   size.*/
+#define OD_MC_SEARCH_RANGE (128)
 
+typedef struct od_mv_limits od_mv_limits;
 typedef struct od_mv_node od_mv_node;
 typedef struct od_mv_dp_state od_mv_dp_state;
 typedef struct od_mv_dp_node od_mv_dp_node;
@@ -38,7 +40,14 @@ typedef struct od_mv_dp_node od_mv_dp_node;
 # include "mc.h"
 # include "encint.h"
 
-typedef uint16_t od_sad4[4];
+typedef int32_t od_sad4[4];
+
+struct od_mv_limits {
+  int xmin;
+  int xmax;
+  int ymin;
+  int ymax;
+};
 
 /*The state information used by the motion estimation process that is not
    required by the decoder.
@@ -48,7 +57,12 @@ typedef uint16_t od_sad4[4];
 struct od_mv_node {
   /*The historical motion vectors for EPZS^2, stored at full-pel resolution.
     Indexed by [time][reference_type][component].*/
+  /*reference_type : OD_FRAME_GOLD, OD_FRAME_PREV.*/
+  /*component : x, y, time in display order. */
+  /*Note: At present, bma_mvs keeps track of P frame's BMA MVs.*/
   int bma_mvs[3][2][2];
+  /*BMA mv of the mv node at the current frame.*/
+  int bma_mv_curr[2];
   /*The current estimated rate of this MV.*/
   unsigned mv_rate:16;
   /*The current size of the block with this MV at its upper-left.*/
@@ -62,6 +76,9 @@ struct od_mv_node {
   /*The SAD for BMA predictor centered on this node.
     Used for the dynamic thresholds of the initial EPZS^2 pass.*/
   int32_t bma_sad;
+  /*In case B frame is used, bma_sad of P will be overwritten,
+     so bma_sad is saved from the most recent P frame here.*/
+  int32_t bma_sad_p;
   /*The location of this node in the grid.*/
   int vx;
   int vy;
@@ -147,6 +164,9 @@ struct od_mv_est_ctx {
   od_sad4 **sad_cache[OD_LOG_MVB_DELTA0];
   /*The state of the MV mesh specific to the encoder.*/
   od_mv_node **mvs;
+  /*Timing of BMA history in display order*/
+  /*[time].*/
+  int bma_history_time[3];
   /*A temporary copy of the decoder-side MV grid used to save-and-restore the
      MVs when attempting sub-pel refinement.*/
   od_mv_grid_pt **refine_grid;
@@ -166,9 +186,11 @@ struct od_mv_est_ctx {
   int thresh2_offs[OD_NMVBSIZES];
   /*The weights used to produce the accelerated MV predictor.*/
   int32_t mvapw[2][2];
-  /*Flags indicating which MVs have already been tested during the initial
-     EPZS^2 pass.*/
-  unsigned char hit_cache[OD_MC_SEARCH_RANGE*2][OD_MC_SEARCH_RANGE*2];
+  /*Flags indicating which halfpel MVs have already been tested during the
+     initial BMA search.
+    Valid halfpel coordinates must be in the range -OD_MC_SEARCH_RANGE*2 to
+     OD_MC_SEARCH_RANGE*2, this determines the size of this cache.*/
+  unsigned char hit_cache[OD_MC_SEARCH_RANGE*2*2][OD_MC_SEARCH_RANGE*2*2];
   /*The flag used by the current EPZS search iteration.*/
   unsigned hit_bit;
   /*The Lagrangian multiplier used for R-D optimization.*/
@@ -187,7 +209,7 @@ struct od_mv_est_ctx {
   /*This function is set switchable between SAD and SATD based on the current
      stage of ME/MC. At present, SAD function is called for stage 1, 2, and 3,
      and SATD functions are called for stage 4 (i.e. sub-pel refine).*/
-  int (*compute_distortion)(od_enc_ctx *enc, const unsigned char *p,
+  int32_t (*compute_distortion)(od_enc_ctx *enc, const unsigned char *p,
    int pystride, int pxstride, int pli, int x, int y, int log_blk_sz);
 };
 

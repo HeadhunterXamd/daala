@@ -28,13 +28,37 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 
 void od_enc_opt_vtbl_init_x86(od_enc_ctx *enc);
 
-int od_mc_compute_sad_4x4_xstride_1_sse(const unsigned char *src,
+int32_t od_mc_compute_sad8_4x4_sse(const unsigned char *src,
  int systride, const unsigned char *ref, int dystride);
-int od_mc_compute_sad_8x8_xstride_1_sse(const unsigned char *_src,
+int32_t od_mc_compute_sad8_8x8_sse(const unsigned char *_src,
  int systride, const unsigned char *ref, int dystride);
-int od_mc_compute_sad_16x16_xstride_1_sse2(const unsigned char *src,
+int32_t od_mc_compute_sad8_16x16_sse2(const unsigned char *src,
  int systride, const unsigned char *ref, int dystride);
-int od_mc_compute_sad_32x32_xstride_1_sse2(const unsigned char *src,
+int32_t od_mc_compute_sad8_32x32_sse2(const unsigned char *src,
  int systride, const unsigned char *ref, int dystride);
+int32_t od_mc_compute_sad8_64x64_sse2(const unsigned char *src,
+ int systride, const unsigned char *ref, int dystride);
+
+int32_t od_mc_compute_satd8_4x4_sse2(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_satd8_8x8_sse2(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_satd8_16x16_sse2(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_satd8_32x32_sse2(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_satd8_64x64_sse2(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+
+int32_t od_mc_compute_satd16_4x4_sse2(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_satd16_8x8_sse2(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_satd16_16x16_sse2(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_satd16_32x32_sse2(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
+int32_t od_mc_compute_satd16_64x64_sse2(const unsigned char *src, int systride,
+ const unsigned char *ref, int dystride);
 
 #endif

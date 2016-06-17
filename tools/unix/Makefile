@@ -24,7 +24,7 @@
 
 MAKEDEPEND = $(CC) -MM
 CINCLUDE = `pkg-config ogg libpng --cflags`
-CFLAGS = -Wall -Wno-parentheses -Wno-overlength-strings -Wno-long-long -Wshadow
+CFLAGS = -Wall -Wno-overlength-strings -Wno-long-long -Wshadow
 CFLAGS += -std=c89 -pedantic -fopenmp
 CFLAGS += -O3
 CFLAGS += -g
@@ -103,13 +103,8 @@ PSNRHVS_TARGET:=dump_psnrhvs
 #block_size_analysis
 BSIZE_LOCAL_CSOURCES = \
 block_size_analysis.c \
-block_size.c \
 block_size_enc.c \
-generic_encoder.c \
-generic_code.c \
-laplace_encoder.c \
 logging.c \
-laplace_tables.c \
 vidinput.c \
 y4m_input.c \
 dct.c \
@@ -165,7 +160,10 @@ DS_TARGET:=downsample
 US_LOCAL_CSOURCES = \
 vidinput.c \
 y4m_input.c \
-upsample.c
+upsample.c \
+dering.c \
+filter.c \
+util.c
 
 US_LIB_CSOURCES = \
 dct.c \
@@ -175,8 +173,14 @@ switch_table.c \
 logging.c \
 info.c \
 mc.c \
+partition.c \
 pvq.c \
-state.c
+state.c \
+zigzag4.c \
+zigzag8.c \
+zigzag16.c \
+zigzag32.c \
+zigzag64.c
 
 US_LDFLAGS = `pkg-config ogg libpng --libs` -lm
 
@@ -247,6 +251,33 @@ CBASIS_OBJS:=${CBASIS_LOCAL_CSOURCES} ${CBASIS_LIB_CSOURCES}
 CBASIS_OBJS:=${CBASIS_OBJS:%.c=${WORKDIR}/%.o}
 CBASIS_CSOURCES:=${CBASIS_LOCAL_CSOURCES:%=${LOCALSRCDIR}/%} ${CBASIS_LIB_CSOURCES:%=${LIBSRCDIR}/%}
 CBASIS_TARGET:=compute_basis
+
+#compute_haar_basis
+CHBASIS_LOCAL_CSOURCES = \
+compute_haar_basis.c
+
+CHBASIS_LIB_CSOURCES = \
+dct.c \
+filter.c \
+internal.c
+
+CHBASIS_LDFLAGS = `pkg-config ogg libpng --libs` -lm
+
+CHBASIS_OBJS:=${CHBASIS_LOCAL_CSOURCES} ${CHBASIS_LIB_CSOURCES}
+CHBASIS_OBJS:=${CHBASIS_OBJS:%.c=${WORKDIR}/%.o}
+CHBASIS_CSOURCES:=${CHBASIS_LOCAL_CSOURCES:%=${LOCALSRCDIR}/%} ${CHBASIS_LIB_CSOURCES:%=${LIBSRCDIR}/%}
+CHBASIS_TARGET:=compute_haar_basis
+
+#cos_search
+COS_SEARCH_LOCAL_CSOURCES = \
+cos_search.c
+
+COS_SEARCH_LDFLAGS = -lm
+
+COS_SEARCH_OBJS:=${COS_SEARCH_LOCAL_CSOURCES}
+COS_SEARCH_OBJS:=${COS_SEARCH_OBJS:%.c=${WORKDIR}/%.o}
+COS_SEARCH_CSOURCES:=${COS_SEARCH_LOCAL_CSOURCES:%=${LOCALSRCDIR}/%}
+COS_SEARCH_TARGET:=cos_search
 
 #trans2d
 T2D_LOCAL_CSOURCES = \
@@ -369,8 +400,9 @@ DZZ_TARGET:=draw_zigzags
 
 ALL_OBJS:=${P2Y_OBJS} ${Y2P_OBJS} ${PSNR_OBJS} ${PSNRHVS_OBJS} \
  ${GEN_CDF_OBJS} ${GEN_LAPLACE_TABLES_OBJS} ${T_OBJS} \
- ${TG_OBJS} ${CBASIS_OBJS} ${T2D_OBJS} ${BSIZE_OBJS} ${BD_OBJS} \
- ${YJ_OBJS} ${JY_OBJS} ${DZZ_OBJS} ${MONO_OBJS} ${DS_OBJS} ${US_OBJS}
+ ${TG_OBJS} ${CBASIS_OBJS} ${CHBASIS_OBJS} ${COS_SEARCH_OBJS} ${T2D_OBJS} \
+ ${BSIZE_OBJS} ${BD_OBJS} ${YJ_OBJS} ${JY_OBJS} ${DZZ_OBJS} ${MONO_OBJS} \
+ ${DS_OBJS} ${US_OBJS}
 
 ALL_ASMS:=${ALL_OBJS:%.o=%.s}
 
@@ -378,9 +410,9 @@ ALL_DEPS:=${ALL_OBJS:%.o=%.d}
 
 ALL_TARGETS:=${P2Y_TARGET} ${Y2P_TARGET} ${PSNR_TARGET} ${PSNRHVS_TARGET} \
  ${GEN_CDF_TARGET} ${GEN_LAPLACE_TABLES_TARGET} ${T_TARGET} \
- ${TG_TARGET} ${CBASIS_TARGET} ${T2D_TARGET} ${BSIZE_TARGET} ${BD_TARGET} \
- ${YJ_TARGET} ${JY_TARGET} ${DZZ_TARGET} ${MONO_TARGET} ${DS_TARGET} \
- ${US_TARGET}
+ ${TG_TARGET} ${CBASIS_TARGET} ${CHBASIS_TARGET} ${COS_SEARCH_TARGET} \
+ ${T2D_TARGET} ${BSIZE_TARGET} ${BD_TARGET} ${YJ_TARGET} ${JY_TARGET} \
+ ${DZZ_TARGET} ${MONO_TARGET} ${DS_TARGET} ${US_TARGET}
 
 all: ${ALL_TARGETS}
 
@@ -416,6 +448,12 @@ ${TG_TARGET}: ${TG_OBJS}
 
 ${CBASIS_TARGET}: ${CBASIS_OBJS}
 	${CC} ${CFLAGS} ${CBASIS_OBJS} ${CBASIS_LDFLAGS} -o $@
+
+${CHBASIS_TARGET}: ${CHBASIS_OBJS}
+	${CC} ${CFLAGS} ${CHBASIS_OBJS} ${CHBASIS_LDFLAGS} -o $@
+
+${COS_SEARCH_TARGET}: ${COS_SEARCH_OBJS}
+	${CC} ${CFLAGS} ${COS_SEARCH_OBJS} ${COS_SEARCH_LDFLAGS} -o $@
 
 ${T2D_TARGET}: ${T2D_OBJS}
 	${CC} ${CFLAGS} ${T2D_OBJS} ${T2D_LDFLAGS} -o $@

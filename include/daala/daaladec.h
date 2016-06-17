@@ -27,7 +27,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.*/
 #if !defined(_daala_daaladec_H)
 # define _daala_daaladec_H (1)
 # include "codec.h"
-# include <ogg/ogg.h>
 
 # if defined(__cplusplus)
 extern "C" {
@@ -39,13 +38,14 @@ extern "C" {
 #define OD_DECCTL_SET_BSIZE_BUFFER (7001)
 #define OD_DECCTL_SET_FLAGS_BUFFER (7003)
 #define OD_DECCTL_SET_MV_BUFFER    (7005)
-/** Copy the motion compensated reference into a user supplied od_img.
- * \param[in]  <tt>od_img*</tt>: Pointer to the user supplied od_img.
+/** Copy the motion compensated reference into a user supplied daala_image.
+ * \param[in]  <tt>daala_image*</tt>: Pointer to the user supplied daala_image.
  *              Image must be allocated by the caller, and must be the
  *              same format as the decoder output images. */
 #define OD_DECCTL_SET_MC_IMG       (7007)
 #define OD_DECCTL_GET_ACCOUNTING   (7009)
 #define OD_DECCTL_SET_ACCOUNTING_ENABLED (7011)
+#define OD_DECCTL_SET_DERING_BUFFER (7013)
 
 
 #define OD_ACCT_FRAME (10)
@@ -100,7 +100,7 @@ typedef struct {
 typedef struct daala_dec_ctx daala_dec_ctx;
 /**Setup information.
    This contains auxiliary information decoded from the setup header by
-    daala_decode_header_in() to be passed to daala_decode_alloc().
+    daala_decode_header_in() to be passed to daala_decode_create().
    It can be re-used to initialize any number of decoders, and can be freed
     via daala_setup_free() at any time.*/
 typedef struct daala_setup_info daala_setup_info;
@@ -134,11 +134,12 @@ typedef struct daala_setup_info daala_setup_info;
              The application may immediately begin using the contents of this
               structure after the second header is decoded, though it must
               continue to be passed in on all subsequent calls.
+             Users should free the returned data with daala_comment_clear().
  * \param ds A pointer to a daala_setup_info pointer to fill in.
              The contents of this pointer must be initialized to <tt>NULL</tt>
               on the first call, and the returned value must continue to be
               passed in on all subsequent calls.
- * \param op The current header packet to process.
+ * \param dp The current header packet to process.
  * \return A positive value indicates that a Daala header was successfully
             processed and indicates the remaining number of headers to be read.
  * \retval 0 The last header was processed and the next packet will
@@ -153,7 +154,7 @@ typedef struct daala_setup_info daala_setup_info;
                         <tt>libdaaladec</tt>.
  * \retval OD_ENOTFORMAT The packet was not a Daala header.*/
 int daala_decode_header_in(daala_info *info,
- daala_comment *dc, daala_setup_info **ds, const ogg_packet *op);
+ daala_comment *dc, daala_setup_info **ds, const daala_packet *dp);
 
 /**Allocates a decoder instance.
  * \param info A #daala_info struct filled via daala_decode_header_in().
@@ -161,7 +162,7 @@ int daala_decode_header_in(daala_info *info,
  *               daala_decode_header_in().
  * \return The initialized #daala_dec_ctx handle.
  * \retval NULL If the decoding parameters were invalid.*/
-daala_dec_ctx *daala_decode_alloc(const daala_info *info,
+daala_dec_ctx *daala_decode_create(const daala_info *info,
  const daala_setup_info *setup);
 /**Releases all storage used for the decoder setup information.
  * This should be called after you no longer want to create any decoders for
@@ -183,11 +184,19 @@ int daala_decode_ctl(daala_dec_ctx *dec,
  * \param dec A #daala_dec_ctx handle.*/
 void daala_decode_free(daala_dec_ctx *dec);
 /**Retrieves decoded video data frames.
- * \param dec A #daala_dec_ctx handle.
+ * \param dec A #daala_dec_ctx handle.*/
+int daala_decode_packet_in(daala_dec_ctx *dec, const daala_packet *dp);
+/**Outputs the next available decoded image frame.
  * \param img A buffer to receive the decoded image data.
- * \param op An incoming Ogg packet.*/
-int daala_decode_packet_in(daala_dec_ctx *dec, od_img *img,
- const ogg_packet *op);
+ * \param dp An incoming Daala packet.
+ * \return A positive value 1 means an output image was available
+ *          and was placed in \a img.
+ * \retval 1 An decoded image was available and was placed in \a img.
+ * \retval 0 No image was available, so the contents of \a img were left
+ *            unchanged.
+ * \retval OD_EFAULT One of \a dec or \a img was <tt>NULL</tt>.*/
+int daala_decode_img_out(daala_dec_ctx *dec, daala_image *img);
+
 /*@}*/
 
 /** \defgroup decctlcodes Configuration keys for the decoder ctl interface.
